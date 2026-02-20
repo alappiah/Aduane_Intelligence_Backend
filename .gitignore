@@ -1,3 +1,6 @@
 .env
 __pycache__/
 .vscode/
+data/
+ghana_recipe_db/
+ml_models/
