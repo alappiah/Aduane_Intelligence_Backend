@@ -1,0 +1,18 @@
+# version: '3.8'
+
+services:
+  db:
+    image: postgres:15
+    container_name: ghana_recipe_db
+    restart: always
+    environment:
+      POSTGRES_USER: recipe_user
+      POSTGRES_PASSWORD: recipe_pass
+      POSTGRES_DB: recipe_app
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
