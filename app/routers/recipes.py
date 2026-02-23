@@ -2,11 +2,11 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 import pandas as pd
 import joblib
-import chromadb
-from sentence_transformers import SentenceTransformer
-import ollama
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+from ollama import AsyncClient # Switched to Async for better server performance
 import os
-import random
+from ..schemas import RecipeRequest
 
 router = APIRouter(prefix="/recipes", tags=["Recipes"])
 
@@ -21,35 +21,34 @@ try:
     }
     encoder = joblib.load('ml_models/encoder.pkl')
     model_columns = joblib.load('ml_models/model_columns.pkl')
-except:
-    print("❌ Critical: ML Models missing.")
+except Exception as e:
+    print(f"❌ Critical: ML Models missing. Error: {e}")
 
-# 2. Load Vector DB
-chroma_client = chromadb.PersistentClient(path="./ghana_recipe_db")
-collection = chroma_client.get_collection("ghana_recipes")
-embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
 
-# 3. Load Data
+
+# 2. Load Data
 csv_path = "./data/final_recipes.csv"
-# Check for the version with images first
 if os.path.exists("./data/ghana_recipes_v3.csv"):
     csv_path = "./data/ghana_recipes_v3.csv"
 elif not os.path.exists(csv_path): 
     csv_path = "./data/ghana_recipes_v2.csv"
 
 data = pd.read_csv(csv_path)
+
+# Clean text columns for the TF-IDF vectorizer
+text_cols = ['name', 'ingredients', 'tags', 'meal_type']
+for col in text_cols:
+    if col in data.columns:
+        data[col] = data[col].fillna('')
+
 print(f"✅ System Ready! Loaded data from {csv_path}")
 
-# --- DATA MODELS ---
-class RecipeRequest(BaseModel):
-    query: str
-    health_condition: str
-    current_reading: float = None
 
 # --- HELPER: SAFETY CHECKER ---
 def check_safety(recipe_row, condition):
     condition = condition.title()
-    if condition not in ml_predictors: return 0 # Default to Unsafe if model missing
+    if condition not in ml_predictors or condition == "None": 
+        return 1 # Default to Safe if no condition is provided
     
     features = ['sodium_mg', 'sugar_g', 'fiber_g', 'fat_total_g', 'fat_saturated_g', 'potassium_mg', 'iron_mg', 'meal_type', 'tags']
     try:
@@ -63,11 +62,12 @@ def check_safety(recipe_row, condition):
         df_final = pd.concat([df_num, df_encoded], axis=1)
         df_final = df_final.reindex(columns=model_columns, fill_value=0)
         return int(ml_predictors[condition].predict(df_final)[0])
-    except:
+    except Exception as e:
+        print(f"⚠️ ML Prediction Error for {condition}: {e}")
         return 0
 
-# --- HELPER: GENERATE MENU SUMMARY ---
-def generate_menu_summary(recipe_names, condition, query):
+# --- HELPER: GENERATE MENU SUMMARY (Now Async) ---
+async def generate_menu_summary(recipe_names, condition, query):
     names_str = ", ".join(recipe_names)
     prompt = f"""
     You are a Ghanaian Nutritionist.
@@ -80,7 +80,7 @@ def generate_menu_summary(recipe_names, condition, query):
     Do not list them again. Just say something nice about the selection.
     """
     try:
-        response = ollama.chat(model='llama3.1:8b', messages=[
+        response = await AsyncClient().chat(model='phi:3-mini', messages=[
             {'role': 'user', 'content': prompt},
         ])
         return response['message']['content'].replace('"', '')
@@ -90,67 +90,75 @@ def generate_menu_summary(recipe_names, condition, query):
     
 
 @router.post("/recommend")
-def recommend_recipes(request: RecipeRequest):
+async def recommend_recipes(request: RecipeRequest): # Note: Changed to async def
     print(f"🔍 Menu Request: '{request.query}' for {request.health_condition}")
     
-    # 1. SEARCH (Fetch more candidates to ensure variety)
-    query_embed = embedding_model.encode([request.query]).tolist()
-    results = collection.query(query_embeddings=query_embed, n_results=20) # Get top 20
-
-    if not results['metadatas'] or not results['metadatas'][0]:
-        return {"count": 0, "results": [], "message": "No recipes found."}
-
-    found_ids = [int(str(m['recipe_id'])) for m in results['metadatas'][0]]
-    # Filter unique IDs to avoid duplicates
-    found_ids = list(set(found_ids))
-    candidates = data.loc[found_ids].copy()
+    # 1. HARD FILTER LAYER (Iterate through all data and apply ML models)
+    safe_indices = []
+    for idx, row in data.iterrows():
+        if check_safety(row, request.health_condition) == 1:
+            safe_indices.append(idx)
+            
+    safe_df = data.loc[safe_indices].copy()
     
-    safe_pool = []
-    
-    # 2. FILTER (Collect ALL safe options)
-    for idx, row in candidates.iterrows():
-        # A. Clinical Safety Check (Random Forest)
-        safety_score = check_safety(row, request.health_condition)
+    if safe_df.empty:
+        return {"count": 0, "results": [], "message": "No safe options found for this health condition."}
         
-        if safety_score == 1:
-            # We add it to the pool
-            safe_pool.append(row)
-    
-    # 3. RANDOMIZE (The Shuffle)
-    if not safe_pool:
-        return {"count": 0, "results": [], "message": "No safe options found for this specific query."}
+    safe_df = safe_df.reset_index(drop=True)
 
-    # Shuffle the list to make it random each time
-    random.shuffle(safe_pool)
+    # 2. FEATURE ENGINEERING FOR CONTENT-BASED FILTERING
+    # Ensure 'ingredients' exists in the CSV, otherwise just use name + tags + meal_type
+    ingredients_col = safe_df['ingredients'] if 'ingredients' in safe_df.columns else ""
     
-    # Pick top 3
-    selected_recipes = safe_pool[:3]
+    safe_df['combined_features'] = safe_df['name'] + " " + \
+                                   ingredients_col + " " + \
+                                   safe_df['tags'] + " " + \
+                                   safe_df['meal_type']
+                                   
+    all_text_data = safe_df['combined_features'].tolist()
+    all_text_data.append(request.query)
+
+    # 3. VECTORIZATION & SIMILARITY SCORING (The core CBF logic)
+    vectorizer = TfidfVectorizer(stop_words='english')
+    tfidf_matrix = vectorizer.fit_transform(all_text_data)
     
+    cosine_sim = cosine_similarity(tfidf_matrix[-1], tfidf_matrix[:-1])[0]
+    
+    # Get top 3 indices based on similarity score
+    top_n = min(3, len(safe_df))
+    top_indices = cosine_sim.argsort()[-top_n:][::-1]
+
     # 4. PREPARE OUTPUT
     output_list = []
     recipe_names = []
+    
+    results_df = safe_df.iloc[top_indices]
 
-    for row in selected_recipes:
+    for _, row in results_df.iterrows():
         recipe_names.append(row['name'])
+        
+        # Safely handle missing ID column by using the dataframe index if recipe_id is missing
+        recipe_id = row['recipe_id'] if 'recipe_id' in row else _ 
+        
         output_list.append({
-            "id": int(str(row.name)),
+            "id": int(recipe_id),
             "name": row['name'],
             "description": row.get('description', 'Authentic Ghanaian Dish'),
             "meal_type": str(row.get('meal_type', 'General')).upper(),
             "tags": str(row.get('tags', 'Local')).split(','),
             "nutrition": {
-                "sugar": f"{row['sugar_g']}g",
-                "sodium": f"{row['sodium_mg']}mg",
-                "fat": f"{row['fat_saturated_g']}g"
+                "sugar": f"{row.get('sugar_g', 0)}g",
+                "sodium": f"{row.get('sodium_mg', 0)}mg",
+                "fat": f"{row.get('fat_saturated_g', 0)}g"
             },
             "image_url": row.get('image_url', 'https://placehold.co/600x400')
         })
 
-    # 5. GENERATE AI SUMMARY
-    ai_message = generate_menu_summary(recipe_names, request.health_condition, request.query)
+    # 5. GENERATE AI SUMMARY (Awaited so it doesn't block the server)
+    ai_message = await generate_menu_summary(recipe_names, request.health_condition, request.query)
 
     return {
         "count": len(output_list),
-        "ai_message": ai_message, # The intro text
-        "results": output_list    # The 3 recipes for your cards
+        "ai_message": ai_message,
+        "results": output_list
     }

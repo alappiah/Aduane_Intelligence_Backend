@@ -40,3 +40,7 @@ class Message(MessageBase):
 
     class Config:
         from_attributes = True
+
+class RecipeRequest(BaseModel):
+    query: str
+    health_condition: str
