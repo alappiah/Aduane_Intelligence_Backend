@@ -44,3 +44,7 @@ class Message(MessageBase):
 class RecipeRequest(BaseModel):
     query: str
     health_condition: str
+
+class ChatRequest(BaseModel):
+    query: str
+    health_condition: str
