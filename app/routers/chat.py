@@ -115,7 +115,7 @@ async def handle_user_message(request: ChatRequest):
     """
     
     try:
-        intent_response = await AsyncClient().chat(model='phi3:mini', messages=[
+        intent_response = await AsyncClient().chat(model='llama3.1:8b', messages=[
             {'role': 'user', 'content': classification_prompt},
         ])
         intent = intent_response['message']['content'].strip()

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, Boolean, ForeignKey, DateTime, JSON
 from sqlalchemy.orm import relationship
 from .database import Base
 from datetime import datetime
@@ -23,6 +23,9 @@ class Message(Base):
     content = Column(String)
     sender = Column(String)  # "user" or "ai"
     timestamp = Column(DateTime, default=datetime.utcnow)
+
+    # A column to store the recipe list as JSON
+    recipes = Column(JSON, default=[])
     
     # The "Magic Link": This connects the message to a specific user
     owner_id = Column(Integer, ForeignKey("users.id"))

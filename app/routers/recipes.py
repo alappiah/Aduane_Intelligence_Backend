@@ -80,7 +80,7 @@ async def generate_menu_summary(recipe_names, condition, query):
     Do not list them again. Just say something nice about the selection.
     """
     try:
-        response = await AsyncClient().chat(model='phi3:mini', messages=[
+        response = await AsyncClient().chat(model='llama3.1:8b', messages=[
             {'role': 'user', 'content': prompt},
         ])
         return response['message']['content'].replace('"', '')

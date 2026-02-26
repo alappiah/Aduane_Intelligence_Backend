@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from datetime import datetime
+from typing import List, Optional, Any
 
 # Schema for RECEIVING data (User Signup form from Flutter)
 class UserCreate(BaseModel):
@@ -30,6 +31,9 @@ class MessageBase(BaseModel):
     content: str
     sender: str
 
+    # Allow the API to accept the recipes list, defaulting to empty
+    recipes: Optional[List[Any]] = []
+
 class MessageCreate(MessageBase):
     pass
 
@@ -38,6 +42,7 @@ class Message(MessageBase):
     owner_id: int
     timestamp: datetime
 
+    recipes: List[Any] = []
     class Config:
         from_attributes = True
 
