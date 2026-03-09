@@ -53,3 +53,12 @@ class RecipeRequest(BaseModel):
 class ChatRequest(BaseModel):
     query: str
     health_condition: str
+
+class EditMessageRequest(BaseModel):
+    user_message_id: int
+    ai_message_id: int
+    new_user_text: str
+
+class UpdateMessageRequest(BaseModel):
+    content: str
+    recipes: List[Any] = []

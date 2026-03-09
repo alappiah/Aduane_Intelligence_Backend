@@ -1,11 +1,11 @@
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import pandas as pd
-import joblib
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
-from ollama import AsyncClient # Switched to Async for better server performance
-import os
+from ollama import AsyncClient
+import os, json, asyncio, joblib
 from ..schemas import RecipeRequest
 
 router = APIRouter(prefix="/recipes", tags=["Recipes"])
@@ -23,7 +23,6 @@ try:
     model_columns = joblib.load('ml_models/model_columns.pkl')
 except Exception as e:
     print(f"❌ Critical: ML Models missing. Error: {e}")
-
 
 
 # 2. Load Data
@@ -66,34 +65,13 @@ def check_safety(recipe_row, condition):
         print(f"⚠️ ML Prediction Error for {condition}: {e}")
         return 0
 
-# --- HELPER: GENERATE MENU SUMMARY (Now Async) ---
-async def generate_menu_summary(recipe_names, condition, query):
-    names_str = ", ".join(recipe_names)
-    prompt = f"""
-    You are a Ghanaian Nutritionist.
-    User Condition: {condition}
-    User Request: "{query}"
-    
-    We have selected 3 options: {names_str}.
-    
-    Write a SHORT (1 sentence) friendly intro recommending these three choices for their variety and safety. 
-    Do not list them again. Just say something nice about the selection.
-    """
-    try:
-        response = await AsyncClient().chat(model='llama3.1:8b', messages=[
-            {'role': 'user', 'content': prompt},
-        ])
-        return response['message']['content'].replace('"', '')
-    except Exception as e:
-        print(f"❌ OLLAMA ERROR: {e}")
-        return "Here are three delicious and safe options I selected for you."
-    
 
+# --- MAIN ROUTE: RECOMMEND & STREAM ---
 @router.post("/recommend")
-async def recommend_recipes(request: RecipeRequest): # Note: Changed to async def
+async def recommend_recipes(request: RecipeRequest):
     print(f"🔍 Menu Request: '{request.query}' for {request.health_condition}")
     
-    # 1. HARD FILTER LAYER (Iterate through all data and apply ML models)
+    # 1. HARD FILTER LAYER 
     safe_indices = []
     for idx, row in data.iterrows():
         if check_safety(row, request.health_condition) == 1:
@@ -102,14 +80,16 @@ async def recommend_recipes(request: RecipeRequest): # Note: Changed to async de
     safe_df = data.loc[safe_indices].copy()
     
     if safe_df.empty:
-        return {"count": 0, "results": [], "message": "No safe options found for this health condition."}
+        # If no recipes are safe, return an empty stream
+        async def empty_stream():
+            yield f"data: {json.dumps({'type': 'text', 'content': 'I could not find any medically safe options for that.'})}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+        return StreamingResponse(empty_stream(), media_type="text/event-stream")
         
     safe_df = safe_df.reset_index(drop=True)
 
-    # 2. FEATURE ENGINEERING FOR CONTENT-BASED FILTERING
-    # Ensure 'ingredients' exists in the CSV, otherwise just use name + tags + meal_type
+    # 2. FEATURE ENGINEERING
     ingredients_col = safe_df['ingredients'] if 'ingredients' in safe_df.columns else ""
-    
     safe_df['combined_features'] = safe_df['name'] + " " + \
                                    ingredients_col + " " + \
                                    safe_df['tags'] + " " + \
@@ -118,26 +98,21 @@ async def recommend_recipes(request: RecipeRequest): # Note: Changed to async de
     all_text_data = safe_df['combined_features'].tolist()
     all_text_data.append(request.query)
 
-    # 3. VECTORIZATION & SIMILARITY SCORING (The core CBF logic)
+    # 3. VECTORIZATION & SIMILARITY SCORING
     vectorizer = TfidfVectorizer(stop_words='english')
     tfidf_matrix = vectorizer.fit_transform(all_text_data)
-    
     cosine_sim = cosine_similarity(tfidf_matrix[-1], tfidf_matrix[:-1])[0]
     
-    # Get top 3 indices based on similarity score
     top_n = min(3, len(safe_df))
     top_indices = cosine_sim.argsort()[-top_n:][::-1]
 
-    # 4. PREPARE OUTPUT
+    # 4. PREPARE OUTPUT DATA
     output_list = []
     recipe_names = []
-    
     results_df = safe_df.iloc[top_indices]
 
     for _, row in results_df.iterrows():
         recipe_names.append(row['name'])
-        
-        # Safely handle missing ID column by using the dataframe index if recipe_id is missing
         recipe_id = row['recipe_id'] if 'recipe_id' in row else _ 
         
         output_list.append({
@@ -154,11 +129,49 @@ async def recommend_recipes(request: RecipeRequest): # Note: Changed to async de
             "image_url": row.get('image_url', 'https://placehold.co/600x400')
         })
 
-    # 5. GENERATE AI SUMMARY (Awaited so it doesn't block the server)
-    ai_message = await generate_menu_summary(recipe_names, request.health_condition, request.query)
+    # 5. GENERATE THE STREAM 
+    async def recipe_stream_generator():
+        prompt = f"""
+        You are a friendly Ghanaian Nutritionist. 
+        The user has {request.health_condition} and asked for "{request.query}". 
+        You are recommending these exact dishes: {', '.join(recipe_names)}.
+        
+        Write EXACTLY ONE short, friendly sentence introducing these dishes. 
+        Do NOT write a guide. Do NOT give medical advice. STOP writing after the first sentence.
+        """
 
-    return {
-        "count": len(output_list),
-        "ai_message": ai_message,
-        "results": output_list
-    }
+        try:
+            # Point this to your active Colab Ngrok URL
+            client = AsyncClient(host='https://unjudging-unsystematically-delsie.ngrok-free.dev')
+            
+            async for chunk in await client.chat(
+                model='llama3.1:8b',  # Use the standard model you pulled
+                messages=[{'role': 'user', 'content': prompt}], 
+                stream=True
+            ):
+                
+                text_piece = chunk['message']['content']
+                if text_piece:
+                    packet = json.dumps({"type": "text", "content": text_piece})
+                    yield f"data: {packet}\n\n"
+
+            # B. STREAM RECIPE CARDS
+            for recipe in output_list:
+                await asyncio.sleep(0.4) # Pause for visual effect
+                packet = json.dumps({"type": "recipe", "content": recipe})
+                yield f"data: {packet}\n\n"
+
+            # C. END THE STREAM
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+        # 1. ADD THIS BLOCK: Catch the user pressing Stop!
+        except asyncio.CancelledError:
+            print("🛑 User disconnected. Stopping Ollama generation.")
+            return # Exiting the generator cuts the connection to Colab instantly
+            
+        except Exception as e:
+            print(f"❌ Stream Error: {e}")
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+    # 6. RETURN THE OPEN PIPELINE TO FLUTTER
+    return StreamingResponse(recipe_stream_generator(), media_type="text/event-stream")
