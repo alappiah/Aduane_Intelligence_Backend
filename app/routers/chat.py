@@ -99,6 +99,14 @@ async def ask_medical_question(request: ChatRequest):
 
             # 2. TELL FLUTTER WE ARE DONE (No recipes for medical answers)
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+        # 🌟 THE CRITICAL FIX: Catch the disconnect signal from Flutter
+        except asyncio.CancelledError:
+            print("🛑 [Intent 2] User pressed Stop! Terminating stream.")
+            # Yielding a specific packet lets Flutter know we stopped gracefully
+            yield f"data: {json.dumps({'type': 'text', 'content': ' ... [Stopped]'})}\n\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+            return 
             
         except Exception as e:
             print(f"❌ RAG Stream Error: {e}")
@@ -192,7 +200,7 @@ def delete_chat_history(user_id: int, db: Session = Depends(get_db)):
     """Permanently deletes all chat history for a specific user."""
     try:
         # We target all messages where owner_id matches the user
-        query = text("DELETE FROM chat_messages WHERE owner_id = :u_id")
+        query = text("DELETE FROM messages WHERE owner_id = :u_id")
         db.execute(query, {"u_id": user_id})
         db.commit()
         
