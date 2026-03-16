@@ -4,3 +4,4 @@ __pycache__/
 data/
 ghana_recipe_db/
 ml_models/
+ghana_recipe_db/chroma.sqlite3
