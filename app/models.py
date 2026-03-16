@@ -13,6 +13,9 @@ class User(Base):
     hashed_password = Column(String)
     is_active = Column(Boolean, default=True)
     messages = relationship("Message", back_populates="owner")
+
+    reset_code = Column(String(10), nullable=True) 
+    reset_code_expires = Column(DateTime(timezone=True), nullable=True)
     
 
 
