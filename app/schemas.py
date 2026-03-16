@@ -62,3 +62,11 @@ class EditMessageRequest(BaseModel):
 class UpdateMessageRequest(BaseModel):
     content: str
     recipes: List[Any] = []
+
+class ForgotPasswordRequest(BaseModel):
+    email: str
+
+class ResetPasswordRequest(BaseModel):
+    email: str
+    reset_code: str
+    new_password: str
