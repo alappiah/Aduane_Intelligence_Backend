@@ -76,8 +76,11 @@ async def ask_medical_question(request: ChatRequest):
     
     # Build the strict prompt
     async def rag_stream_generator():
-        prompt = f"""
-        You are a Ghanaian medical nutritionist. 
+       prompt = f"""
+        You are an expert Ghanaian medical nutritionist. 
+        The user asking this question has the following health profile: {request.health_condition}.
+        Please tailor your medical advice specifically to be safe and relevant for someone with this condition.
+        
         Answer this question: {request.query}
         Use this context: {context} 
         """
