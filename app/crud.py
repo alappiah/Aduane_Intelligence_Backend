@@ -35,3 +35,4 @@ def get_user_messages(db: Session, user_id: int):
     #This is the security filter: it ONLY returns messages for this user_id
     # Added .order_by to ensure the chat history is in the correct chronological order
     return db.query(models.Message).filter(models.Message.owner_id == user_id).order_by(models.Message.timestamp.asc()).all()
+

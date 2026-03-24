@@ -27,6 +27,18 @@ class UserLogin(BaseModel):
     email: str
     password: str
 
+class UserUpdate(BaseModel):
+    firstName: str
+    lastName: Optional[str] = ""
+    date_of_birth: Optional[str] = None
+    height_cm: Optional[int] = None
+    current_weight_kg: Optional[float] = None
+    goal_weight_kg: Optional[float] = None
+    goal_calories: Optional[int] = 2000
+    goal_steps: Optional[int] = 10000
+    activity_level: Optional[str] = "Moderately Active"
+    health_condition: Optional[str] = "None"
+
 class MessageBase(BaseModel):
     content: str
     sender: str

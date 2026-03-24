@@ -150,3 +150,33 @@ def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db))
     
     print("✅ Password successfully reset!")
     return {"message": "Password has been reset successfully. You can now log in."}
+
+@router.put("/users/update/{user_id}")
+def update_user_profile(user_id: int, profile_data: schemas.UserUpdate, db: Session = Depends(get_db)):
+    # 1. Find the exact user in the database
+    db_user = db.query(models.User).filter(models.User.id == user_id).first()
+    
+    # 2. If they don't exist, throw a 404
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # 3. Update all the fields (Adding type: ignore to bypass Pylance false positives)
+    db_user.firstName = profile_data.firstName  # type: ignore
+    db_user.lastName = profile_data.lastName  # type: ignore
+    db_user.date_of_birth = profile_data.date_of_birth  # type: ignore
+    db_user.height_cm = profile_data.height_cm  # type: ignore
+    db_user.current_weight_kg = profile_data.current_weight_kg  # type: ignore
+    db_user.goal_weight_kg = profile_data.goal_weight_kg  # type: ignore
+    db_user.goal_calories = profile_data.goal_calories  # type: ignore
+    db_user.goal_steps = profile_data.goal_steps  # type: ignore
+    db_user.activity_level = profile_data.activity_level  # type: ignore
+    db_user.health_condition = profile_data.health_condition  # type: ignore
+
+    # 4. Commit the changes to the PostgreSQL database
+    try:
+        db.commit()
+        db.refresh(db_user)
+        return {"message": "Profile updated successfully", "user_id": db_user.id}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to update profile: {str(e)}")
