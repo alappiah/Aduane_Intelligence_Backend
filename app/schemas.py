@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from datetime import datetime
+from datetime import datetime, date
 from typing import List, Optional, Any
 
 # Schema for RECEIVING data (User Signup form from Flutter)
@@ -82,3 +82,28 @@ class ResetPasswordRequest(BaseModel):
     email: str
     reset_code: str
     new_password: str
+
+class MealCreate(BaseModel):
+    user_id: int  # We need to know WHO ate the food!
+    name: str
+    mealType: str
+    calories: int
+    carbs: Optional[int] = 0
+    protein: Optional[int] = 0
+    fats: Optional[int] = 0
+    sodium: Optional[int] = 0
+    sugar: Optional[int] = 0
+    time: str  # e.g., "12:30 PM"
+
+class StepSync(BaseModel):
+    user_id: int
+    date: date
+    steps: int
+
+class WorkoutCreate(BaseModel):
+    user_id: int
+    name: str
+    type: str  
+    durationMinutes: int
+    caloriesBurned: int
+    time: str
