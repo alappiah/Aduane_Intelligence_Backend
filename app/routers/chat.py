@@ -2,18 +2,20 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from typing import List
-import chromadb, json, asyncio
+import chromadb, json, asyncio, os
 from chromadb.utils.embedding_functions import OllamaEmbeddingFunction
 from ollama import AsyncClient
-from sqlalchemy import text
+from dotenv import load_dotenv
 
-# Import your database and crud logic
-from .. import crud, schemas
+# Import your database, models, and crud logic
+from .. import crud, schemas, models # 🌟 Added models here!
 from ..database import get_db
 
-# Import BOTH request types to fix the mismatch!
+# Import BOTH request types
 from ..schemas import ChatRequest, RecipeRequest, UpdateMessageRequest 
 from .recipes import recommend_recipes
+
+load_dotenv()
 
 router = APIRouter(
     prefix="/chat",
@@ -21,14 +23,17 @@ router = APIRouter(
 )
 
 # ==========================================
-# 1. FIX: INITIALIZE THE VECTOR DATABASE
+# 🌟 1. CENTRALIZED AI CONFIGURATION
 # ==========================================
-DB_PATH = "./ghana_recipe_db"
+# Change this Ngrok URL in ONE place when your Colab restarts!
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "https://unjudging-unsystematically-delsie.ngrok-free.dev")
+LOCAL_EMBED_URL = "http://localhost:11434/api/embeddings"
 EMBED_MODEL = "mxbai-embed-large"
+DB_PATH = "./ghana_recipe_db"
 
 try:
     chroma_client = chromadb.PersistentClient(path=DB_PATH)
-    ollama_ef = OllamaEmbeddingFunction(model_name=EMBED_MODEL, url="http://localhost:11434/api/embeddings")
+    ollama_ef = OllamaEmbeddingFunction(model_name=EMBED_MODEL, url=LOCAL_EMBED_URL)
     med_collection = chroma_client.get_or_create_collection(name="medical_guidelines", embedding_function=ollama_ef)
     print("✅ ChromaDB connected in chat router!")
 except Exception as e:
@@ -43,14 +48,52 @@ except Exception as e:
 def get_history(user_id: int, db: Session = Depends(get_db)):
     """Fetch all previous messages for a specific user."""
     print(f"📬 Fetching chat history for User ID: {user_id}")
-    messages = crud.get_user_messages(db, user_id=user_id)
-    return messages
+    return crud.get_user_messages(db, user_id=user_id)
 
 @router.post("/save/{user_id}", response_model=schemas.Message)
 def save_message(user_id: int, message: schemas.MessageCreate, db: Session = Depends(get_db)):
     """Save a new message to the database."""
     print(f"💾 Saving new {message.sender} message for User ID: {user_id}")
     return crud.create_user_message(db=db, message=message, user_id=user_id)
+
+@router.delete("/history/{user_id}")
+def delete_chat_history(user_id: int, db: Session = Depends(get_db)):
+    """Permanently deletes all chat history for a specific user."""
+    try:
+        # 🌟 REFACTOR: Using secure SQLAlchemy ORM instead of raw text SQL
+        db.query(models.Message).filter(models.Message.owner_id == user_id).delete()
+        db.commit()
+        
+        print(f"🗑️ Database Wipe: History for User {user_id} deleted.")
+        return {"status": "success", "message": "Chat history cleared"}
+        
+    except Exception as e:
+        db.rollback()
+        print(f"🚨 SQL Error during history deletion: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete history")
+
+@router.put("/update/{message_id}")
+def update_message(message_id: int, request: UpdateMessageRequest, db: Session = Depends(get_db)):
+    try:
+        # 🌟 REFACTOR: Using secure SQLAlchemy ORM instead of raw text SQL
+        db_msg = db.query(models.Message).filter(models.Message.id == message_id).first()
+        
+        if not db_msg:
+            raise HTTPException(status_code=404, detail="Message not found")
+            
+        db_msg.content = request.content # type: ignore
+        db_msg.recipes = json.dumps(request.recipes) # type: ignore
+        db.commit()
+        
+        print(f"✅ Database Update: Row {message_id} updated successfully.")
+        return {"status": "success", "message": f"Message {message_id} updated"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback() 
+        print(f"🚨 SQL Error during update: {e}")
+        raise HTTPException(status_code=500, detail="Database update failed")
 
 
 # ==========================================
@@ -59,7 +102,6 @@ def save_message(user_id: int, message: schemas.MessageCreate, db: Session = Dep
 async def ask_medical_question(request: ChatRequest):
     print(f"🩺 RAG Pipeline Triggered for: {request.query}")
     
-    # THE FIX: Return the offline message as a stream!
     if med_collection is None:
         async def offline_stream():
             yield f"data: {json.dumps({'type': 'text', 'content': 'My medical database is currently offline.'})}\n\n"
@@ -69,14 +111,12 @@ async def ask_medical_question(request: ChatRequest):
     # Retrieve the relevant PDF paragraphs from ChromaDB
     results = med_collection.query(
         query_texts=[request.query],
-        n_results=3 # Get the top 3 most relevant chunks
+        n_results=3 
     )
     
     context = "\n\n".join(results['documents'][0]) if results['documents'] else "No specific medical guidelines found."
     
-    # Build the strict prompt
     async def rag_stream_generator():
-        
         prompt = f"""
         You are an expert Ghanaian medical nutritionist. 
         The user asking this question has the following health profile: {request.health_condition}.
@@ -87,27 +127,23 @@ async def ask_medical_question(request: ChatRequest):
         """
 
         try:
-           # Point this to your active Colab Ngrok URL
-            client = AsyncClient(host='https://unjudging-unsystematically-delsie.ngrok-free.dev')
+            # 🌟 REFACTOR: Uses the centralized variable!
+            client = AsyncClient(host=OLLAMA_HOST)
             
             async for chunk in await client.chat(
-                model='thewindmom/llama3-med42-8b', # Your medical model
+                model='thewindmom/llama3-med42-8b', 
                 messages=[{'role': 'user', 'content': prompt}], 
                 stream=True
             ):
-                
                 text_piece = chunk['message']['content']
                 if text_piece:
                     packet = json.dumps({"type": "text", "content": text_piece})
                     yield f"data: {packet}\n\n"
 
-            # 2. TELL FLUTTER WE ARE DONE (No recipes for medical answers)
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
-        # 🌟 THE CRITICAL FIX: Catch the disconnect signal from Flutter
         except asyncio.CancelledError:
             print("🛑 [Intent 2] User pressed Stop! Terminating stream.")
-            # Yielding a specific packet lets Flutter know we stopped gracefully
             yield f"data: {json.dumps({'type': 'text', 'content': ' ... [Stopped]'})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
             return 
@@ -116,7 +152,6 @@ async def ask_medical_question(request: ChatRequest):
             print(f"❌ RAG Stream Error: {e}")
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
-    # Return the open stream!
     return StreamingResponse(rag_stream_generator(), media_type="text/event-stream")
 
 
@@ -124,7 +159,6 @@ async def ask_medical_question(request: ChatRequest):
 async def handle_user_message(request: ChatRequest):
     print(f"🚦 Routing Message: '{request.query}'")
     
-    # 1. THE BULLETPROOF PROMPT
     classification_prompt = f"""
     You are a strict routing bot. Categorize the following message:
     Message: "{request.query}"
@@ -136,82 +170,27 @@ async def handle_user_message(request: ChatRequest):
     """
     
     try:
-        # Point to your Colab Ngrok URL
-        client = AsyncClient(host='https://unjudging-unsystematically-delsie.ngrok-free.dev')
+        # 🌟 REFACTOR: Uses the centralized variable!
+        client = AsyncClient(host=OLLAMA_HOST)
         
-        # Call the model normally (NO streaming for intent detection)
         intent_response = await client.chat(
-            model='llama3.1:8b', # Usually best to use the standard model for routing
+            model='llama3.1:8b', 
             messages=[{'role': 'user', 'content': classification_prompt}], 
-            stream=False # <-- Set this to False!
+            stream=False 
         )
         
-        # Extract the text
+        # 🌟 REFACTOR: Cleaned up the duplicate intent definition
         intent = intent_response['message']['content'].strip()
-        intent = intent_response['message']['content'].strip()
-        
         print(f"🎯 Intent Detected: {intent}")
         
-        # 2. THE BULLETPROOF LOGIC
         if "2" in intent:
-            # If it outputs a 2, send to the Medical RAG model!
             return await ask_medical_question(request)
         else:
-            # Default to Recipes for 1, or if it hallucinates anything else
             recipe_request = RecipeRequest(query=request.query, health_condition=request.health_condition)
             return await recommend_recipes(recipe_request)
 
-    except asyncio.CancelledError:
-            print("🛑 User disconnected. Stopping Ollama generation.")
-            return # Exiting the generator cuts the connection to Colab instantly
-            
     except Exception as e:
         print(f"❌ Router Error: {e}")
+        # Default fallback if the LLM fails to classify
         recipe_request = RecipeRequest(query=request.query, health_condition=request.health_condition)
         return await recommend_recipes(recipe_request)
-
-@router.put("/update/{message_id}")
-def update_message(message_id: int, request: UpdateMessageRequest, db: Session = Depends(get_db)):
-    try:
-        # We target the exact row using the message_id, preserving the Primary Key
-        query = text("""
-            UPDATE messages 
-            SET content = :content, recipes = :recipes 
-            WHERE id = :id
-        """)
-        
-        db.execute(
-            query, 
-            {
-                "content": request.content, 
-                # json.dumps ensures the list formats correctly for PostgreSQL JSON/JSONB columns
-                "recipes": json.dumps(request.recipes), 
-                "id": message_id
-            }
-        )
-        db.commit()
-        
-        print(f"✅ Database Update: Row {message_id} updated successfully.")
-        return {"status": "success", "message": f"Message {message_id} updated"}
-        
-    except Exception as e:
-        db.rollback() # Protects the database if something crashes
-        print(f"🚨 SQL Error during update: {e}")
-        raise HTTPException(status_code=500, detail="Database update failed")
-
-@router.delete("/history/{user_id}")
-def delete_chat_history(user_id: int, db: Session = Depends(get_db)):
-    """Permanently deletes all chat history for a specific user."""
-    try:
-        # We target all messages where owner_id matches the user
-        query = text("DELETE FROM messages WHERE owner_id = :u_id")
-        db.execute(query, {"u_id": user_id})
-        db.commit()
-        
-        print(f"🗑️ Database Wipe: History for User {user_id} deleted.")
-        return {"status": "success", "message": "Chat history cleared"}
-        
-    except Exception as e:
-        db.rollback()
-        print(f"🚨 SQL Error during history deletion: {e}")
-        raise HTTPException(status_code=500, detail="Failed to delete history")

@@ -1,18 +1,29 @@
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
 import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from ollama import AsyncClient
 import os, json, asyncio, joblib
+from dotenv import load_dotenv
+
 from ..schemas import RecipeRequest
+
+load_dotenv()
 
 router = APIRouter(prefix="/recipes", tags=["Recipes"])
 
-print("⏳ Loading AI Systems...")
+# ==========================================
+# 🌟 1. CENTRALIZED AI CONFIGURATION
+# ==========================================
+# Change this Ngrok URL in ONE place when your Colab restarts!
+OLLAMA_HOST = os.getenv("OLLAMA_HOST", "https://unjudging-unsystematically-delsie.ngrok-free.dev")
 
-# 1. Load ML Guardrails
+print("⏳ Loading AI Systems & ML Models...")
+
+# ==========================================
+# 2. LOAD ML MODELS & DATA ON STARTUP
+# ==========================================
 try:
     ml_predictors = {
         "Diabetes": joblib.load('ml_models/diabetes_model.pkl'),
@@ -23,27 +34,31 @@ try:
     model_columns = joblib.load('ml_models/model_columns.pkl')
 except Exception as e:
     print(f"❌ Critical: ML Models missing. Error: {e}")
+    ml_predictors = {} # Fallback so the app doesn't crash completely
 
-
-# 2. Load Data
+# Load and clean Recipe Data
 csv_path = "./data/final_recipes.csv"
 if os.path.exists("./data/ghana_recipes_v3.csv"):
     csv_path = "./data/ghana_recipes_v3.csv"
 elif not os.path.exists(csv_path): 
     csv_path = "./data/ghana_recipes_v2.csv"
 
-data = pd.read_csv(csv_path)
+try:
+    data = pd.read_csv(csv_path)
+    # Clean text columns for the TF-IDF vectorizer
+    text_cols = ['name', 'ingredients', 'tags', 'meal_type']
+    for col in text_cols:
+        if col in data.columns:
+            data[col] = data[col].fillna('')
+    print(f"✅ System Ready! Loaded data from {csv_path}")
+except Exception as e:
+    print(f"❌ Critical: Recipe CSV missing or corrupted. Error: {e}")
+    data = pd.DataFrame() # Fallback
 
-# Clean text columns for the TF-IDF vectorizer
-text_cols = ['name', 'ingredients', 'tags', 'meal_type']
-for col in text_cols:
-    if col in data.columns:
-        data[col] = data[col].fillna('')
 
-print(f"✅ System Ready! Loaded data from {csv_path}")
-
-
-# --- HELPER: SAFETY CHECKER ---
+# ==========================================
+# 3. HELPER: ML SAFETY CHECKER
+# ==========================================
 def check_safety(recipe_row, condition):
     condition = condition.title()
     if condition not in ml_predictors or condition == "None": 
@@ -66,12 +81,14 @@ def check_safety(recipe_row, condition):
         return 0
 
 
-# --- MAIN ROUTE: RECOMMEND & STREAM ---
+# ==========================================
+# 4. MAIN ROUTE: RECOMMEND & STREAM
+# ==========================================
 @router.post("/recommend")
 async def recommend_recipes(request: RecipeRequest):
     print(f"🔍 Menu Request: '{request.query}' for {request.health_condition}")
     
-    # 1. HARD FILTER LAYER 
+    # 1. HARD FILTER LAYER (Using the ML Models)
     safe_indices = []
     for idx, row in data.iterrows():
         if check_safety(row, request.health_condition) == 1:
@@ -80,7 +97,6 @@ async def recommend_recipes(request: RecipeRequest):
     safe_df = data.loc[safe_indices].copy()
     
     if safe_df.empty:
-        # If no recipes are safe, return an empty stream
         async def empty_stream():
             yield f"data: {json.dumps({'type': 'text', 'content': 'I could not find any medically safe options for that.'})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
@@ -88,7 +104,7 @@ async def recommend_recipes(request: RecipeRequest):
         
     safe_df = safe_df.reset_index(drop=True)
 
-    # 2. FEATURE ENGINEERING
+    # 2. FEATURE ENGINEERING (For similarity search)
     ingredients_col = safe_df['ingredients'] if 'ingredients' in safe_df.columns else ""
     safe_df['combined_features'] = safe_df['name'] + " " + \
                                    ingredients_col + " " + \
@@ -113,7 +129,7 @@ async def recommend_recipes(request: RecipeRequest):
 
     for _, row in results_df.iterrows():
         recipe_names.append(row['name'])
-        recipe_id = row['recipe_id'] if 'recipe_id' in row else _ 
+        recipe_id = row['recipe_id'] if 'recipe_id' in row else 0 
         
         output_list.append({
             "id": int(recipe_id),
@@ -141,15 +157,15 @@ async def recommend_recipes(request: RecipeRequest):
         """
 
         try:
-            # Point this to your active Colab Ngrok URL
-            client = AsyncClient(host='https://unjudging-unsystematically-delsie.ngrok-free.dev')
+            # 🌟 REFACTOR: Uses the centralized variable!
+            client = AsyncClient(host=OLLAMA_HOST)
             
+            # A. STREAM THE INTRO SENTENCE
             async for chunk in await client.chat(
-                model='llama3.1:8b',  # Use the standard model you pulled
+                model='llama3.1:8b',
                 messages=[{'role': 'user', 'content': prompt}], 
                 stream=True
             ):
-                
                 text_piece = chunk['message']['content']
                 if text_piece:
                     packet = json.dumps({"type": "text", "content": text_piece})
@@ -164,10 +180,9 @@ async def recommend_recipes(request: RecipeRequest):
             # C. END THE STREAM
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
-        # 1. ADD THIS BLOCK: Catch the user pressing Stop!
         except asyncio.CancelledError:
             print("🛑 User disconnected. Stopping Ollama generation.")
-            return # Exiting the generator cuts the connection to Colab instantly
+            return 
             
         except Exception as e:
             print(f"❌ Stream Error: {e}")

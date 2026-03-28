@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from . import models
 from .database import engine
-from .routers import auth, recipes, chat # Assuming you make a chat router too
+from .routers import auth, recipes, chat, users # Assuming you make a chat router too
 from fastapi.middleware.cors import CORSMiddleware
 
 # Create database tables
@@ -21,6 +21,7 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(recipes.router)
 app.include_router(chat.router)
+app.include_router(users.router)
 
 @app.get("/")
 def root():

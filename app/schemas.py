@@ -18,6 +18,14 @@ class User(BaseModel):
     lastName: str
     health_condition: str
     is_active: bool
+    # We added these so FastAPI stops hiding them during login!
+    date_of_birth: Optional[str] = None
+    height_cm: Optional[int] = None
+    current_weight_kg: Optional[float] = None
+    goal_weight_kg: Optional[float] = None
+    goal_calories: Optional[int] = 2000
+    goal_steps: Optional[int] = 10000
+    activity_level: Optional[str] = "Moderately Active"
 
     class Config:
         from_attributes = True # This tells Pydantic to read from your PostgreSQL database model
