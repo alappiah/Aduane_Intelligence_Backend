@@ -86,6 +86,8 @@ def check_safety(recipe_row, condition):
 # ==========================================
 @router.post("/recommend")
 async def recommend_recipes(request: RecipeRequest):
+    print(f"📊 DATA CHECK -> Goal: {request.calorie_goal} | Eaten: {request.current_calories}")
+
     print(f"🔍 Menu Request: '{request.query}' for {request.health_condition}")
     
     # 1. HARD FILTER LAYER (Using the ML Models)
@@ -101,7 +103,44 @@ async def recommend_recipes(request: RecipeRequest):
             yield f"data: {json.dumps({'type': 'text', 'content': 'I could not find any medically safe options for that.'})}\n\n"
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
         return StreamingResponse(empty_stream(), media_type="text/event-stream")
+    
         
+    safe_df = safe_df.reset_index(drop=True)
+
+    # ==========================================
+    # 🌟 NEW: 1.5 DYNAMIC CONTEXT FILTERING
+    # ==========================================
+    safe_goal = request.calorie_goal if request.calorie_goal is not None else 2000
+    safe_current = request.current_calories if request.current_calories is not None else 0
+    
+    remaining_calories = safe_goal - safe_current
+    
+    # 🟢 NEW: System Prompt Injection variable to pass to DeepSeek later
+    ai_system_warning = "" 
+
+    # SCENARIO A: User is OVER their limit!
+    if remaining_calories < 0:
+        over_limit_amount = abs(remaining_calories)
+        print(f"🚨 User OVER limit by {over_limit_amount} kcal! Filtering strict...")
+        
+        # 🌟 FIX: Make it sound like a coach, not a doctor!
+        ai_system_warning = f"NUTRITION ALERT: The user is OVER their daily calorie limit by {over_limit_amount} calories. Acknowledge their craving, but firmly and warmly remind them that a heavy meal isn't safe right now due to their limit and hypertension. Advise them to hydrate and ONLY pitch the light recipes listed below."
+        
+        safe_df = safe_df[safe_df['calories'] <= 150]
+        
+    # SCENARIO B: User is NEARING their limit (less than 500 left)
+    elif remaining_calories < 500 and safe_current > 0:
+        print(f"⚠️ User nearing limit. Only {remaining_calories} kcal left.")
+        
+        ai_system_warning = f"CRITICAL: The user only has {remaining_calories} calories left today. Explain that you specifically chose these light options to help them stay safely under their limit."
+        
+        safe_df = safe_df[safe_df['calories'] <= (remaining_calories + 50)]
+
+    # 🟢 SAFETY FALLBACK: If the filters wiped out EVERYTHING, grab the 3 lightest items
+    if safe_df.empty:
+        safe_df = data.loc[safe_indices].copy() 
+        safe_df = safe_df.sort_values(by='calories').head(3) 
+
     safe_df = safe_df.reset_index(drop=True)
 
     # 2. FEATURE ENGINEERING (For similarity search)
@@ -134,6 +173,9 @@ async def recommend_recipes(request: RecipeRequest):
         output_list.append({
             "id": int(recipe_id),
             "name": row['name'],
+            "calories": int(row.get('calories', 0)), # 🌟 Add this later!
+            "carbs": int(row.get('carbs_g', 0)),     # 🌟 Add this later!
+            "protein": int(row.get('protein_g', 0)),
             "description": row.get('description', 'Authentic Ghanaian Dish'),
             "meal_type": str(row.get('meal_type', 'General')).upper(),
             "tags": str(row.get('tags', 'Local')).split(','),
@@ -142,19 +184,29 @@ async def recommend_recipes(request: RecipeRequest):
                 "sodium": f"{row.get('sodium_mg', 0)}mg",
                 "fat": f"{row.get('fat_saturated_g', 0)}g"
             },
-            "image_url": row.get('image_url', 'https://placehold.co/600x400')
+            "image_url": row.get('image_url', 'https://placehold.co/600x400'),
+            "ingredients": str(row.get('ingredients', '')),   
+            "instructions": str(row.get('instructions', ''))
         })
 
     # 5. GENERATE THE STREAM 
     async def recipe_stream_generator():
+        # 5. THE GEMINI/CLAUDE STYLE REFINEMENT
         prompt = f"""
-        You are a friendly Ghanaian Nutritionist. 
-        The user has {request.health_condition} and asked for "{request.query}". 
-        You are recommending these exact dishes: {', '.join(recipe_names)}.
-        
-        Write EXACTLY ONE short, friendly sentence introducing these dishes. 
-        Do NOT write a guide. Do NOT give medical advice. STOP writing after the first sentence.
-        """
+    CONTEXT: You are 'Aduane Intelligence', a sophisticated and insightful Nutrition Coach specialized in Ghanaian cuisine and {request.health_condition} management. 
+    
+    USER INPUT: "{request.query}"
+    BIOMETRIC DATA: {ai_system_warning}
+    AVAILABLE OPTIONS: {recipe_names}
+    
+    GUIDELINES FOR YOUR RESPONSE:
+    1. RELATE & VALIDATE: Start with a brief, witty acknowledgement of their craving. Make it feel human (e.g., "Banku is legendary for a reason, I get it!").
+    2. THE INSIGHT: Instead of a lecture, offer a quick "why" behind the choice. Address the {over_limit_amount} calorie overage and its impact on {request.health_condition} with clarity and warmth.
+    3. THE SHIFT: Seamlessly pivot to the 'AVAILABLE OPTIONS'. Sell the benefits (energy, hydration, flavor) rather than just listing them.
+    4. ZERO HALLUCINATION: You are strictly forbidden from inventing recipes. Only discuss the names in the AVAILABLE OPTIONS list.
+    
+    STYLE: Concise (max 3-4 sentences), balanced, and supportive. Use a touch of wit, but avoid clinical or 'medical emergency' language. No pre-amble like "Here is a response."
+    """
 
         try:
             # 🌟 REFACTOR: Uses the centralized variable!
@@ -162,7 +214,7 @@ async def recommend_recipes(request: RecipeRequest):
             
             # A. STREAM THE INTRO SENTENCE
             async for chunk in await client.chat(
-                model='llama3.1:8b',
+                model='deepseek-r1:7b',
                 messages=[{'role': 'user', 'content': prompt}], 
                 stream=True
             ):

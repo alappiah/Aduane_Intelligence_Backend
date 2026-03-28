@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Float, Integer, String, Boolean, ForeignKey, DateTime, JSON, Date
 from sqlalchemy.orm import relationship
 from .database import Base
-from datetime import datetime
+from datetime import datetime, timezone
 class User(Base):
     __tablename__ = "users"
 
@@ -47,10 +47,6 @@ class Message(Base):
     # Relationship to easily access user data from a message
     owner = relationship("User", back_populates="messages")
 
-from sqlalchemy import Column, Integer, String, ForeignKey, DateTime
-from sqlalchemy.orm import relationship
-from datetime import datetime, timezone
-# (Make sure these imports are at the top of your models.py)
 
 class MealLog(Base):
     __tablename__ = "meal_logs"

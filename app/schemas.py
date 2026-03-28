@@ -1,6 +1,7 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from datetime import datetime, date
 from typing import List, Optional, Any
+import json
 
 # Schema for RECEIVING data (User Signup form from Flutter)
 class UserCreate(BaseModel):
@@ -54,6 +55,20 @@ class MessageBase(BaseModel):
     # Allow the API to accept the recipes list, defaulting to empty
     recipes: Optional[List[Any]] = []
 
+    # 🌟 THE FIX: This intercepts the string from the database and turns it back into a list!
+    @field_validator('recipes', mode='before')
+    @classmethod
+    def parse_recipes_string(cls, value):
+        if isinstance(value, str):
+            try:
+                return json.loads(value)
+            except Exception:
+                return []
+        return value or []
+
+    class Config:
+        from_attributes = True
+
 class MessageCreate(MessageBase):
     pass
 
@@ -62,17 +77,21 @@ class Message(MessageBase):
     owner_id: int
     timestamp: datetime
 
-    recipes: List[Any] = []
+    # recipes: List[Any] = []
     class Config:
         from_attributes = True
 
 class RecipeRequest(BaseModel):
     query: str
     health_condition: str
+    current_calories: Optional[int] = 0 # How much they ate today
+    calorie_goal: Optional[int] = 2000
 
 class ChatRequest(BaseModel):
     query: str
     health_condition: str
+    current_calories: Optional[int] = 0 # How much they ate today
+    calorie_goal: Optional[int] = 2000
 
 class EditMessageRequest(BaseModel):
     user_message_id: int
