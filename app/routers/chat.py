@@ -186,7 +186,7 @@ async def handle_user_message(request: ChatRequest):
         if "2" in intent:
             return await ask_medical_question(request)
         else:
-            recipe_request = RecipeRequest(query=request.query, health_condition=request.health_condition)
+            recipe_request = RecipeRequest(query=request.query, health_condition=request.health_condition, current_calories=request.current_calories, calorie_goal=request.calorie_goal)
             return await recommend_recipes(recipe_request)
 
     except Exception as e:
