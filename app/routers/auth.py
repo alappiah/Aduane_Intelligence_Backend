@@ -7,7 +7,8 @@ import random, os, smtplib
 from datetime import datetime, timedelta, timezone
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from ..schemas import ForgotPasswordRequest, ResetPasswordRequest, StepSync
+from ..schemas import ForgotPasswordRequest, ResetPasswordRequest, StepSync, ChangePasswordRequest
+from ..auth import verify_password, get_password_hash
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -151,3 +152,20 @@ def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db))
     
     print("✅ Password successfully reset!")
     return {"message": "Password has been reset successfully. You can now log in."}
+
+@router.post("/auth/change-password")
+async def change_password(request: ChangePasswordRequest, db: Session = Depends(get_db)):
+    # 1. Find the user
+    user = db.query(models.User).filter(models.User.id == request.user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # 2. Verify the current password
+    if not verify_password(request.current_password, str(user.hashed_password)):
+        raise HTTPException(status_code=400, detail="Incorrect current password")
+
+    # 3. Hash the new password and save it
+    user.hashed_password = get_password_hash(request.new_password)
+    db.commit()
+
+    return {"message": "Password updated successfully"}

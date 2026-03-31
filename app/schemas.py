@@ -110,6 +110,11 @@ class ResetPasswordRequest(BaseModel):
     reset_code: str
     new_password: str
 
+class ChangePasswordRequest(BaseModel):
+    user_id: int
+    current_password: str
+    new_password: str
+
 class MealCreate(BaseModel):
     user_id: int  # We need to know WHO ate the food!
     name: str
