@@ -86,12 +86,16 @@ class RecipeRequest(BaseModel):
     health_condition: str
     current_calories: Optional[int] = 0 # How much they ate today
     calorie_goal: Optional[int] = 2000
+    current_weight_kg: Optional[float] = None
+    goal_weight_kg: Optional[float] = None
 
 class ChatRequest(BaseModel):
     query: str
     health_condition: str
     current_calories: Optional[int] = 0 # How much they ate today
     calorie_goal: Optional[int] = 2000
+    current_weight_kg: Optional[float] = None
+    goal_weight_kg: Optional[float] = None
 
 class EditMessageRequest(BaseModel):
     user_message_id: int
@@ -139,3 +143,4 @@ class WorkoutCreate(BaseModel):
     durationMinutes: int
     caloriesBurned: int
     time: str
+
