@@ -102,3 +102,34 @@ class WorkoutLog(Base):
 
     # Links back to the User table
     owner = relationship("User", back_populates="workouts")
+
+from pgvector.sqlalchemy import Vector # Add to imports
+
+class MedicalGuideline(Base):
+    __tablename__ = "medical_guidelines"
+    id = Column(Integer, primary_key=True, index=True)
+    content = Column(String, nullable=False)
+    metadata_json = Column(JSON) # Ensure this name matches your ingest script
+    embedding = Column(Vector(384))
+
+class Recipe(Base):
+    __tablename__ = "recipes"
+    id = Column(Integer, primary_key=True)
+    name = Column(String, index=True)
+    description = Column(String)
+    ingredients = Column(String)
+    instructions = Column(String)
+    calories = Column(Integer)
+    carbs_g = Column(Float)
+    protein_g = Column(Float)
+    fat_total_g = Column(Float)
+    fat_saturated_g = Column(Float)
+    sodium_mg = Column(Float)
+    sugar_g = Column(Float)
+    fiber_g = Column(Float)
+    potassium_mg = Column(Float)
+    iron_mg = Column(Float)
+    meal_type = Column(String)
+    tags = Column(String)
+    image_url = Column(String)
+    embedding = Column(Vector(384)) # For vector search in Supabase
