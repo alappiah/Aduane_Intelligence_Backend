@@ -94,7 +94,7 @@ def log_meal(meal_data: schemas.MealCreate, db: Session = Depends(get_db)):
 @router.post("/steps/sync")
 def sync_steps(step_data: schemas.StepSync, db: Session = Depends(get_db)):
     try:
-        # Check if we already have a row for this exact user and date
+        # 1. Standard Step Sync Logic
         existing_log = db.query(models.DailyStepLog).filter(
             models.DailyStepLog.user_id == step_data.user_id,
             models.DailyStepLog.date == step_data.date
@@ -104,7 +104,6 @@ def sync_steps(step_data: schemas.StepSync, db: Session = Depends(get_db)):
             if step_data.steps > existing_log.steps:
                 existing_log.steps = step_data.steps
         else:
-            # First sync of the day! Create a new row.
             new_log = models.DailyStepLog(
                 user_id=step_data.user_id,
                 date=step_data.date,
@@ -113,11 +112,54 @@ def sync_steps(step_data: schemas.StepSync, db: Session = Depends(get_db)):
             db.add(new_log)
             
         db.commit()
-        return {"message": "Steps synced successfully!"}
+
+        # 🌟 2. The Achievement Check
+        # We pass the current steps to our helper function
+        new_unlocks = check_for_step_achievements(
+            user_id=step_data.user_id, 
+            current_steps=step_data.steps, 
+            db=db
+        )
+
+        # 3. Return the message AND the new unlocks
+        return {
+            "message": "Steps synced successfully!",
+            "new_achievements": new_unlocks # This will be a list like ['first_steps']
+        }
         
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to sync steps: {str(e)}")
+    
+def check_for_step_achievements(user_id: int, current_steps: int, db: Session):
+    # Define our Ghanaian-themed milestones
+    milestones = {
+        "first_steps": 1000,
+        "market_navigator": 5000,
+        "kejetia_king": 15000
+    }
+
+    new_unlocks = []
+
+    for key, goal in milestones.items():
+        if current_steps >= goal:
+            # Check if the user has ALREADY earned this specific badge
+            already_earned = db.query(models.Achievement).filter(
+                models.Achievement.user_id == user_id,
+                models.Achievement.achievement_key == key
+            ).first()
+
+            if not already_earned:
+                # First time reaching this goal! Save to the database.
+                new_badge = models.Achievement(
+                    user_id=user_id, 
+                    achievement_key=key
+                )
+                db.add(new_badge)
+                new_unlocks.append(key)
+    
+    db.commit()
+    return new_unlocks
     
 @router.get("/{user_id}/dashboard/today")
 def get_today_dashboard(user_id: int, db: Session = Depends(get_db)):
@@ -223,3 +265,65 @@ def log_workout(workout_data: schemas.WorkoutCreate, db: Session = Depends(get_d
     except Exception as e:
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to log workout: {str(e)}")
+    
+@router.get("/stats/weekly/{user_id}", response_model=schemas.WeeklyStatsResponse)
+def get_weekly_stats(user_id: int, db: Session = Depends(get_db)):
+    # 1. Setup the Time Window (Last 7 days)
+    # We use UTC to match your model's default
+    today = datetime.now(timezone.utc).date()
+    seven_days_ago = today - timedelta(days=6)
+
+    # 2. Query the Data
+    # Get steps from the last 7 days
+    step_logs = db.query(models.DailyStepLog).filter(
+        models.DailyStepLog.user_id == user_id,
+        models.DailyStepLog.date >= seven_days_ago
+    ).all()
+
+    # Get meals from the last 7 days
+    meals = db.query(models.MealLog).filter(
+        models.MealLog.user_id == user_id,
+        func.date(models.MealLog.created_at) >= seven_days_ago
+    ).all()
+
+    # Get workouts from the last 7 days
+    workouts = db.query(models.WorkoutLog).filter(
+        models.WorkoutLog.user_id == user_id,
+        func.date(models.WorkoutLog.created_at) >= seven_days_ago
+    ).all()
+
+    # 3. Aggregate data by day
+    # We initialize every day with 0s so the charts don't have "holes"
+    daily_summary = {}
+    for i in range(7):
+        current_date = seven_days_ago + timedelta(days=i)
+        daily_summary[current_date] = {
+            "date": current_date, 
+            "steps": 0, 
+            "calories_consumed": 0, 
+            "calories_burned": 0
+        }
+
+    # Fill Step Totals
+    for log in step_logs:
+        if log.date in daily_summary:
+            daily_summary[log.date]["steps"] = log.steps
+
+    # Fill Calories Consumed (from MealLogs)
+    for meal in meals:
+        m_date = meal.created_at.date()
+        if m_date in daily_summary:
+            daily_summary[m_date]["calories_consumed"] += meal.calories
+
+    # Fill Calories Burned (from WorkoutLogs)
+    for workout in workouts:
+        w_date = workout.created_at.date()
+        if w_date in daily_summary:
+            daily_summary[w_date]["calories_burned"] += workout.calories_burned
+
+    # 4. Return the data
+    return {
+        "daily_summary": list(daily_summary.values()),
+        "meals": meals, # FastAPI/Pydantic will automatically serialize these
+        "workouts": workouts
+    }

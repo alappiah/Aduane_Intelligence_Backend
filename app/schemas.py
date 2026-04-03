@@ -3,6 +3,8 @@ from datetime import datetime, date
 from typing import List, Optional, Any
 import json
 
+
+
 # Schema for RECEIVING data (User Signup form from Flutter)
 class UserCreate(BaseModel):
     firstName: str
@@ -144,5 +146,60 @@ class WorkoutCreate(BaseModel):
     caloriesBurned: int
     time: str
 
+class AchievementBase(BaseModel):
+    achievement_key: str
+
+class AchievementCreate(AchievementBase):
+    user_id: int
+
+class Achievement(AchievementBase):
+    id: int
+    achieved_at: datetime
+
+    class Config:
+        from_attributes = True
+
+# 🌟 Add these first
+class MealLogSchema(BaseModel):
+    id: int
+    name: str
+    meal_type: Optional[str]
+    time_of_day: Optional[str]
+    calories: int
+    carbs: int
+    protein: int
+    fats: int
+    sodium: int
+    sugar: int
+    created_at: datetime
+
+    class Config:
+        from_attributes = True # This allows Pydantic to read SQLAlchemy objects
+
+class WorkoutLogSchema(BaseModel):
+    id: int
+    name: str
+    workout_type: Optional[str]
+    duration_minutes: int
+    calories_burned: int
+    time_of_day: Optional[str]
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class DailyAggregate(BaseModel):
+    date: date
+    steps: int = 0
+    calories_consumed: int = 0
+    calories_burned: int = 0
+
+class WeeklyStatsResponse(BaseModel):
+    daily_summary: List[DailyAggregate]
+    meals: List[MealLogSchema] # This should match your MealLog Pydantic schema
+    workouts: List[WorkoutLogSchema] # This should match your WorkoutLog Pydantic schema
+
+    class Config:
+        from_attributes = True
 
 
