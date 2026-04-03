@@ -144,3 +144,5 @@ class WorkoutCreate(BaseModel):
     caloriesBurned: int
     time: str
 
+
+
