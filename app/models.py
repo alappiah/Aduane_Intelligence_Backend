@@ -1,5 +1,6 @@
-from sqlalchemy import Column, Float, Integer, String, Boolean, ForeignKey, DateTime, JSON, Date
+from sqlalchemy import Column, Float, Integer, String, Boolean, ForeignKey, DateTime, JSON, Date, UniqueConstraint
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 from .database import Base
 from datetime import datetime, timezone
 class User(Base):
@@ -25,6 +26,7 @@ class User(Base):
     meals = relationship("MealLog", back_populates="owner")
     step_logs = relationship("DailyStepLog", back_populates="owner", cascade="all, delete-orphan")
     workouts = relationship("WorkoutLog", back_populates="owner", cascade="all, delete-orphan")
+    achievements = relationship("Achievement", back_populates="user")
     reset_code = Column(String(10), nullable=True) 
     reset_code_expires = Column(DateTime(timezone=True), nullable=True)
     
@@ -133,3 +135,23 @@ class Recipe(Base):
     tags = Column(String)
     image_url = Column(String)
     embedding = Column(Vector(384)) # For vector search in Supabase
+
+class Achievement(Base):
+    __tablename__ = "achievements"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    
+    # The 'key' is the unique identifier (e.g., 'first_steps', 'market_navigator')
+    achievement_key = Column(String, nullable=False)
+    
+    # Automatically set the time when the badge is earned
+    achieved_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships (Optional, but helpful for querying)
+    user = relationship("User", back_populates="achievements")
+
+    # 🌟 CRITICAL: This prevents a user from earning the same badge twice.
+    __table_args__ = (
+        UniqueConstraint('user_id', 'achievement_key', name='_user_achievement_uc'),
+    )
