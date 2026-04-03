@@ -101,8 +101,8 @@ def sync_steps(step_data: schemas.StepSync, db: Session = Depends(get_db)):
         ).first()
 
         if existing_log:
-            # Overwrite the old number with the new, higher number
-            existing_log.steps = step_data.steps 
+            if step_data.steps > existing_log.steps:
+                existing_log.steps = step_data.steps
         else:
             # First sync of the day! Create a new row.
             new_log = models.DailyStepLog(
