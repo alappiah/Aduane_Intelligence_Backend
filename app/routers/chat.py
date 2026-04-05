@@ -10,7 +10,7 @@ from dotenv import load_dotenv
 from .. import crud, schemas, models
 from ..database import get_db
 from ..schemas import ChatRequest, RecipeRequest, UpdateMessageRequest
-from .recipes import recommend_recipes
+from .recipes import get_cached_recipes, recommend_recipes
 
 load_dotenv()
 
@@ -154,6 +154,157 @@ QUESTION: {request.query}
 
     return StreamingResponse(rag_stream_generator(), media_type="text/event-stream")
 
+def find_food_in_db(food_name: str, db: Session):
+    """
+    Performs a fuzzy, case-insensitive search using the RAM cache instead of the DB.
+    """
+    print(f"🔍 Searching RAM cache for: '{food_name}'")
+    
+    try:
+        # 1. Grab the cached DataFrame (Instant!)
+        df = get_cached_recipes(db)
+        
+        if df.empty:
+            return None
+
+        # 2. Pandas fuzzy search (case-insensitive 'contains')
+        # This is the Pandas equivalent of SQL's ILIKE '%food_name%'
+        matches = df[df['name'].str.contains(food_name, case=False, na=False)]
+
+        # 3. If we found a match, return the first one as a dictionary
+        if not matches.empty:
+            result = matches.iloc[0] # Grab the first matched row
+            print(f"✅ Found match in Cache: {result['name']}")
+            return {
+                "id": int(result.get('id', 0)),
+                "name": str(result.get('name', 'Unknown')),
+                "calories": int(result.get('calories', 0))
+            }
+        else:
+            print(f"❌ No match found in cache for '{food_name}'")
+            return None
+            
+    except Exception as e:
+        print(f"🚨 Cache Search Error: {e}")
+        return None
+
+
+async def handle_food_logging(request: ChatRequest, db: Session):
+    """Path 3: Handles statements like 'I ate Waakye' and streams the response."""
+    print(f"📝 Logging Intent Triggered for: {request.query}")
+    
+    # 1. SILENT AI EXTRACTOR: Get the food name for the DB lookup (No stream)
+    try:
+        extract_response = await groq_client.chat.completions.create(
+            model="llama-3.1-8b-instant",
+            messages=[
+                {"role": "system", "content": "Extract ONLY the name of the food from the user's sentence. Nothing else."},
+                {"role": "user", "content": request.query}
+            ],
+            max_tokens=10,
+            temperature=0.0
+        )
+        food_name = extract_response.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"⚠️ Extraction failed: {e}")
+        food_name = request.query # Fallback
+        
+    # 2. SEARCH DATABASE
+    # (Replace this with your actual DB search logic/function)
+    food_item = find_food_in_db(food_name, db) 
+    
+    # 3. STREAM GENERATOR (Talking to the user)
+    async def logging_stream_generator():
+        # Tell the AI what happened in the database so it can talk to the user about it
+        if food_item:
+            calories = food_item.get('calories', 0)
+            food_id = food_item.get('id', 0)
+            system_prompt = f"The user just ate '{food_item['name']}', which is {calories} calories. In 2 short sentences, enthusiastically acknowledge this, tell them the calories, and ask if they want you to log it to their daily tracker."
+        else:
+            system_prompt = f"The user said they ate '{food_name}', but you don't have the exact nutrition facts for that right now. In 2 short sentences, apologize and ask if they would like to enter the calories manually."
+
+        try:
+            stream = await groq_client.chat.completions.create(
+                model="llama-3.1-8b-instant",
+                messages=[
+                    {"role": "system", "content": "You are Aduane Intelligence, a helpful Ghanaian nutrition assistant."},
+                    {"role": "user", "content": system_prompt}
+                ],
+                stream=True,
+                temperature=0.6
+            )
+
+            # Stream the conversational text to Flutter
+            async for chunk in stream:
+                text_piece = chunk.choices[0].delta.content or ""
+                if text_piece:
+                    yield f"data: {json.dumps({'type': 'text', 'content': text_piece})}\n\n"
+
+            # 🌟 PRO-TIP FOR FLUTTER: Send a hidden UI trigger packet!
+            if food_item:
+                # We send a special packet at the end that the UI can catch to display the Yes/No buttons
+                action_packet = {
+                    "type": "log_action",
+                    "food_name": food_item['name'],
+                    "food_id": food_id,
+                    "calories": calories
+                }
+                yield f"data: {json.dumps(action_packet)}\n\n"
+
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+        except asyncio.CancelledError:
+            print("🛑 Logging stream cancelled by user.")
+        except Exception as e:
+            print(f"❌ Groq Logging Stream Error: {e}")
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+    return StreamingResponse(logging_stream_generator(), media_type="text/event-stream")
+
+async def handle_general_chat(request: ChatRequest):
+    """Path 4: Handles greetings, small talk, and off-topic queries."""
+    print(f"👋 General Chat Triggered for: {request.query}")
+
+    async def chat_stream_generator():
+        # The Persona: Friendly, but highly focused on bringing them back to the app's purpose
+        system_prompt = """
+        You are 'Aduane Intelligence', a friendly, witty, and helpful Ghanaian Nutrition Coach.
+        The user has just said something conversational, a greeting, or something completely off-topic.
+        
+        INSTRUCTIONS:
+        1. Reply naturally and warmly in 1 to 2 short sentences.
+        2. Briefly introduce yourself if they ask who you are.
+        3. Gently steer the conversation back to your core capabilities: recommending healthy Ghanaian meals, tracking calories, or answering health/nutrition questions.
+        """
+
+        try:
+            stream = await groq_client.chat.completions.create(
+                model="llama-3.1-8b-instant", # The 8B model is perfect (and fast) for general chat
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": request.query}
+                ],
+                stream=True,
+                temperature=0.7 # A little higher temperature makes the AI sound more natural and conversational
+            )
+
+            # Stream the conversational text to Flutter
+            async for chunk in stream:
+                text_piece = chunk.choices[0].delta.content or ""
+                if text_piece:
+                    yield f"data: {json.dumps({'type': 'text', 'content': text_piece})}\n\n"
+
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+        except asyncio.CancelledError:
+            print("🛑 General chat stream cancelled by user.")
+            return
+        except Exception as e:
+            print(f"❌ Groq General Chat Error: {e}")
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+    return StreamingResponse(chat_stream_generator(), media_type="text/event-stream")
+
 
 # ==========================================
 # 4. INTENT ROUTER
@@ -170,27 +321,30 @@ async def handle_user_message(request: ChatRequest, db: Session = Depends(get_db
             messages=[
                 {
                     "role": "system", 
-                    "content": "You are a routing bot. Reply ONLY with 1 (Food Request) or 2 (Medical Question)."
+                    "content": "You are a strict intent classification engine. You must output EXACTLY ONE DIGIT (1, 2, 3, or 4). Do not output any other text, punctuation, or explanation."
                 },
                 {
                     "role": "user", 
-                    "content": f"""Categorize: '{request.query}'
+                    "content": f"""Categorize the following user message: '{request.query}'
                     
-                    1 = User is asking for a menu, recipes, or 'what should I eat'.
-                    2 = User is asking 'Why', 'How', or for health/medical explanations.
+                    Choose the best fit:
+                    1 = RECOMMENDATION (User wants food suggestions, a menu, or asks 'what should I eat?').
+                    2 = FACTUAL/MEDICAL (User asks 'How many calories?', 'Why?', or asks a health/nutrition question).
+                    3 = LOGGING/CONSUMPTION (User states they ate something, e.g., 'I ate Waakye', 'I just had lunch').
+                    4 = GENERAL/CHIT-CHAT (Greetings, small talk, or unclear/random statements).
                     
-                    Reply ONLY with the number."""
+                    Output ONLY the number:"""
                 }
             ],
-            max_tokens=1
+            max_tokens=1,
+            temperature=0.0 # 🌟 CRITICAL: Set to 0.0 so it never guesses or hallucinates!
         )
 
         intent = intent_response.choices[0].message.content.strip()
         print(f"🎯 Intent Detected: {intent}")
 
-        if "2" in intent:
-            return await ask_medical_question(request, db)
-        else:
+        # Path 1: Recommendations (Your original function)
+        if intent == "1":
             recipe_request = RecipeRequest(
                 query=request.query,
                 health_condition=request.health_condition,
@@ -198,6 +352,20 @@ async def handle_user_message(request: ChatRequest, db: Session = Depends(get_db
                 calorie_goal=request.calorie_goal
             )
             return await recommend_recipes(recipe_request, db)
+
+        # Path 2: Factual / Medical (Your original function)
+        elif intent == "2":
+            return await ask_medical_question(request, db)
+
+        # Path 3: Logging ("I ate Waakye")
+        elif intent == "3":
+            # Create a new function for this!
+            return await handle_food_logging(request, db)
+
+        # Path 4 & Fallback: General Chat
+        else:
+            # Handle greetings or weird prompts gracefully
+            return await handle_general_chat(request)
 
     except Exception as e:
         print(f"❌ Router Error: {e}. Falling back to recipes.")

@@ -7,6 +7,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from groq import AsyncGroq # ⚡ High-speed cloud AI
 import os, json, asyncio, joblib
 from dotenv import load_dotenv
+from datetime import datetime, timedelta
 
 from ..database import get_db
 from .. import models, schemas
@@ -21,6 +22,10 @@ router = APIRouter(prefix="/recipes", tags=["Recipes"])
 # ==========================================
 # Groq handles the "Coach" logic
 groq_client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
+# 🌟 GLOBAL CACHE VARIABLES
+_cached_recipe_df = None
+_cache_last_updated = None
+CACHE_TTL_MINUTES = 60
 
 print("⏳ Loading ML Safety Predictors...")
 try:
@@ -36,6 +41,27 @@ except Exception as e:
     print(f"❌ Warning: ML Models missing. Safety checks will be restricted. Error: {e}")
     ml_predictors = {}
 
+def get_cached_recipes(db: Session) -> pd.DataFrame:
+    global _cached_recipe_df, _cache_last_updated
+    
+    now = datetime.now()
+    
+    # If we don't have the data yet, OR if the data is older than 60 minutes, fetch it!
+    if _cached_recipe_df is None or _cache_last_updated is None or (now - _cache_last_updated) > timedelta(minutes=CACHE_TTL_MINUTES):
+        print("🔄 Fetching fresh recipes from Supabase...")
+        db_recipes = db.query(models.Recipe).all()
+        
+        recipe_data = [
+            {column.name: getattr(recipe, column.name) for column in recipe.__table__.columns} 
+            for recipe in db_recipes
+        ]
+        
+        _cached_recipe_df = pd.DataFrame(recipe_data)
+        _cache_last_updated = now
+    else:
+        print("⚡ Serving recipes directly from RAM cache!")
+
+    return _cached_recipe_df
 
 # ==========================================
 # 2. HELPER: ML SAFETY CHECKER
@@ -80,13 +106,7 @@ async def recommend_recipes(request: RecipeRequest, db: Session = Depends(get_db
     
     # 1. Fetch ALL recipes from Supabase (Fresh from the DB)
     try:
-        db_recipes = db.query(models.Recipe).all()
-        # Convert SQLAlchemy objects to a list of dicts for Pandas processing
-        recipe_data = [
-            {column.name: getattr(recipe, column.name) for column in recipe.__table__.columns} 
-            for recipe in db_recipes
-        ]
-        data = pd.DataFrame(recipe_data)
+        data = get_cached_recipes(db).copy()
     except Exception as e:
         print(f"🚨 Database Error: {e}")
         raise HTTPException(status_code=500, detail="Could not fetch recipes from database.")

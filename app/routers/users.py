@@ -101,8 +101,8 @@ def sync_steps(step_data: schemas.StepSync, db: Session = Depends(get_db)):
         ).first()
 
         if existing_log:
-            if step_data.steps > existing_log.steps:
-                existing_log.steps = step_data.steps
+            # 🌟 THE FIX: Remove the guardrail and ALWAYS overwrite!
+            existing_log.steps = step_data.steps 
         else:
             new_log = models.DailyStepLog(
                 user_id=step_data.user_id,
@@ -113,8 +113,7 @@ def sync_steps(step_data: schemas.StepSync, db: Session = Depends(get_db)):
             
         db.commit()
 
-        # 🌟 2. The Achievement Check
-        # We pass the current steps to our helper function
+        # 2. The Achievement Check
         new_unlocks = check_for_step_achievements(
             user_id=step_data.user_id, 
             current_steps=step_data.steps, 
@@ -124,7 +123,7 @@ def sync_steps(step_data: schemas.StepSync, db: Session = Depends(get_db)):
         # 3. Return the message AND the new unlocks
         return {
             "message": "Steps synced successfully!",
-            "new_achievements": new_unlocks # This will be a list like ['first_steps']
+            "new_achievements": new_unlocks
         }
         
     except Exception as e:
