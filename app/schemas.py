@@ -13,6 +13,7 @@ class UserCreate(BaseModel):
     password: str
     health_condition: str = "None" # Defaults to "None" if they skip it
 
+
 # Schema for SENDING data back (Returning the User Profile)
 class User(BaseModel):
     id: int
@@ -21,7 +22,6 @@ class User(BaseModel):
     lastName: str
     health_condition: str
     is_active: bool
-    # We added these so FastAPI stops hiding them during login!
     date_of_birth: Optional[str] = None
     height_cm: Optional[int] = None
     current_weight_kg: Optional[float] = None
@@ -137,6 +137,7 @@ class StepSync(BaseModel):
     user_id: int
     date: date
     steps: int
+    calories_burned: int
 
 class WorkoutCreate(BaseModel):
     user_id: int
@@ -203,3 +204,5 @@ class WeeklyStatsResponse(BaseModel):
         from_attributes = True
 
 
+class FCMTokenUpdate(BaseModel):
+    fcm_token: str

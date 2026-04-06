@@ -37,3 +37,6 @@ cloudinary==1.44.1
 
 # Async
 anyio==4.12.1
+
+firebase-admin==6.5.0
+apscheduler==3.10.4
