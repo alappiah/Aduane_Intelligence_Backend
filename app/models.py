@@ -13,6 +13,7 @@ class User(Base):
     health_condition = Column(String, default="None")
     hashed_password = Column(String)
     is_active = Column(Boolean, default=True)
+    
 
     date_of_birth = Column(String, nullable=True) # e.g. "March 15, 1995"
     height_cm = Column(Integer, nullable=True)
@@ -21,6 +22,7 @@ class User(Base):
     goal_calories = Column(Integer, default=2000)
     goal_steps = Column(Integer, default=10000)
     activity_level = Column(String, default="Moderately Active")
+    fcm_token = Column(String, nullable=True)
 
     messages = relationship("Message", back_populates="owner")
     meals = relationship("MealLog", back_populates="owner")
@@ -83,7 +85,7 @@ class DailyStepLog(Base):
     # We use Date because we only care about the specific day (e.g., 2026-03-25)
     date = Column(Date, nullable=False) 
     steps = Column(Integer, default=0)
-
+    calories_burned = Column(Integer, default=0)
     # Links back to the User table
     owner = relationship("User", back_populates="step_logs")
 

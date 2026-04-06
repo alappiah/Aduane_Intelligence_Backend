@@ -1,9 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func
 from datetime import datetime, timezone, timedelta
+
+
 from .. import models, schemas
 from ..database import get_db
+from app.services.notifications import notify_user_of_badge
 
 router = APIRouter(prefix="/users", tags=["User Dashboard & Tracking"])
 
@@ -62,6 +65,25 @@ def update_user_profile(user_id: int, profile_data: schemas.UserUpdate, db: Sess
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to update profile: {str(e)}")
     
+@router.post("/{user_id}/update-fcm-token")
+async def update_fcm_token(user_id: int, data: schemas.FCMTokenUpdate, db: Session = Depends(get_db)):
+    # 1. Find the user in the database
+    user = db.query(models.User).filter(models.User.id == user_id).first()
+    # 🌟 ADD THIS PRINT LINE:
+    # print(f"DEBUG: Received request for User {user_id} with Token: '{data.fcm_token}'")
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # 2. Update the token column
+    user.fcm_token = data.fcm_token
+    
+    try:
+        db.commit()
+        return {"message": "FCM Token updated successfully", "status": "success"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    
 @router.post("/meals/log")
 def log_meal(meal_data: schemas.MealCreate, db: Session = Depends(get_db)):
     try:
@@ -102,12 +124,14 @@ def sync_steps(step_data: schemas.StepSync, db: Session = Depends(get_db)):
 
         if existing_log:
             # 🌟 THE FIX: Remove the guardrail and ALWAYS overwrite!
-            existing_log.steps = step_data.steps 
+            existing_log.steps = step_data.steps
+            existing_log.calories_burned = step_data.calories_burned
         else:
             new_log = models.DailyStepLog(
                 user_id=step_data.user_id,
                 date=step_data.date,
-                steps=step_data.steps
+                steps=step_data.steps,
+                calories_burned=step_data.calories_burned
             )
             db.add(new_log)
             
@@ -130,35 +154,50 @@ def sync_steps(step_data: schemas.StepSync, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to sync steps: {str(e)}")
     
+# Update your check_for_step_achievements to trigger notifications
+from sqlalchemy.orm import joinedload # 🌟 Don't forget this import!
+
 def check_for_step_achievements(user_id: int, current_steps: int, db: Session):
-    # Define our Ghanaian-themed milestones
     milestones = {
         "first_steps": 1000,
         "market_navigator": 5000,
         "kejetia_king": 15000
     }
-
-    new_unlocks = []
-
-    for key, goal in milestones.items():
-        if current_steps >= goal:
-            # Check if the user has ALREADY earned this specific badge
-            already_earned = db.query(models.Achievement).filter(
-                models.Achievement.user_id == user_id,
-                models.Achievement.achievement_key == key
-            ).first()
-
-            if not already_earned:
-                # First time reaching this goal! Save to the database.
-                new_badge = models.Achievement(
-                    user_id=user_id, 
-                    achievement_key=key
-                )
-                db.add(new_badge)
-                new_unlocks.append(key)
     
+    new_unlocks = []
+    
+    # 1. Fetch the specific user instance
+    user = db.query(models.User).options(joinedload(models.User.achievements)).filter(models.User.id == user_id).first()
+    
+    if not user:
+        return []
+
+    # 🌟 FIX: Use 'user.achievements' (the instance), not 'models.User.achievements' (the class)
+    # Also, match your model column name: 'achievement_key'
+    owned_badges = [a.achievement_key for a in user.achievements]
+
+    for badge_key, goal in milestones.items():
+        if current_steps >= goal and badge_key not in owned_badges:
+            # 2. Save to Database
+            new_achievement = models.Achievement(user_id=user_id, achievement_key=badge_key)
+            db.add(new_achievement)
+            new_unlocks.append(badge_key)
+            
+            # 3. 🌟 TRIGGER THE PUSH NOTIFICATION
+            # FIX: Use 'user.fcm_token', not 'models.User.fcm_token'
+            if user.fcm_token:
+                notify_user_of_badge(user.fcm_token, badge_key)
+
     db.commit()
     return new_unlocks
+
+@router.get("/{user_id}/achievements")
+def get_user_achievements(user_id: int, db: Session = Depends(get_db)):
+    # 1. Look up all rows in the achievements table for this user
+    achievements = db.query(models.Achievement).filter(models.Achievement.user_id == user_id).all()
+    
+    # 2. Return just the keys (e.g., ["first_steps", "market_navigator"])
+    return [a.achievement_key for a in achievements]
     
 @router.get("/{user_id}/dashboard/today")
 def get_today_dashboard(user_id: int, db: Session = Depends(get_db)):
@@ -172,6 +211,7 @@ def get_today_dashboard(user_id: int, db: Session = Depends(get_db)):
         step_dates = db.query(models.DailyStepLog.date).filter(models.DailyStepLog.user_id == user_id, models.DailyStepLog.steps > 0).all()
         meal_dates = db.query(func.date(models.MealLog.created_at)).filter(models.MealLog.user_id == user_id).all()
         workout_dates = db.query(func.date(models.WorkoutLog.created_at)).filter(models.WorkoutLog.user_id == user_id).all()
+        achievements = db.query(models.Achievement).filter(models.Achievement.user_id == user_id).all()
 
         # B. Combine them into a single set of unique dates
         active_dates = set()
@@ -235,7 +275,8 @@ def get_today_dashboard(user_id: int, db: Session = Depends(get_db)):
                     "durationMinutes": workout.duration_minutes, "caloriesBurned": workout.calories_burned,
                     "time": workout.time_of_day
                 } for workout in today_workouts
-            ]
+            ],
+            "achievements": achievements
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch dashboard: {str(e)}")
@@ -326,3 +367,4 @@ def get_weekly_stats(user_id: int, db: Session = Depends(get_db)):
         "meals": meals, # FastAPI/Pydantic will automatically serialize these
         "workouts": workouts
     }
+

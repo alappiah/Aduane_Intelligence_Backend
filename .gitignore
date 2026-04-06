@@ -4,3 +4,5 @@ __pycache__/
 
 ghana_recipe_db/
 ghana_recipe_db/chroma.sqlite3
+
+firebase-service-account.json
