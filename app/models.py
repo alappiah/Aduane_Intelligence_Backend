@@ -24,11 +24,11 @@ class User(Base):
     activity_level = Column(String, default="Moderately Active")
     fcm_token = Column(String, nullable=True)
 
-    messages = relationship("Message", back_populates="owner")
-    meals = relationship("MealLog", back_populates="owner")
+    messages = relationship("Message", back_populates="owner", cascade="all, delete-orphan")
+    meals = relationship("MealLog", back_populates="owner", cascade="all, delete-orphan")
     step_logs = relationship("DailyStepLog", back_populates="owner", cascade="all, delete-orphan")
     workouts = relationship("WorkoutLog", back_populates="owner", cascade="all, delete-orphan")
-    achievements = relationship("Achievement", back_populates="user")
+    achievements = relationship("Achievement", back_populates="user", cascade="all, delete-orphan")
     reset_code = Column(String(10), nullable=True) 
     reset_code_expires = Column(DateTime(timezone=True), nullable=True)
     
@@ -44,6 +44,8 @@ class Message(Base):
 
     # A column to store the recipe list as JSON
     recipes = Column(JSON, default=[])
+
+    owner_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
     
     # The "Magic Link": This connects the message to a specific user
     owner_id = Column(Integer, ForeignKey("users.id"))

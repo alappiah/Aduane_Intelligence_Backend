@@ -65,6 +65,29 @@ def update_user_profile(user_id: int, profile_data: schemas.UserUpdate, db: Sess
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to update profile: {str(e)}")
     
+@router.delete("/{user_id}/delete-account")
+def delete_user_account(user_id: int, db: Session = Depends(get_db)):
+    try:
+        # 1. Find the user in your database
+        user = db.query(models.User).filter(models.User.id == user_id).first()
+        
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # 2. Delete the user
+        # Thanks to the CASCADE rules you set up, Supabase will automatically 
+        # wipe their messages, meals, steps, workouts, and achievements simultaneously.
+        db.delete(user)
+        db.commit()
+
+        print(f"✅ Successfully deleted User {user_id} and all associated data.")
+        return {"status": "success", "message": "Account completely deleted"}
+
+    except Exception as e:
+        db.rollback()
+        print(f"❌ Error deleting account: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to delete account: {str(e)}")
+    
 @router.post("/{user_id}/update-fcm-token")
 async def update_fcm_token(user_id: int, data: schemas.FCMTokenUpdate, db: Session = Depends(get_db)):
     # 1. Find the user in the database

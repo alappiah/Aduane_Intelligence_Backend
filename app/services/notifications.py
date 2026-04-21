@@ -30,7 +30,7 @@ def notify_user_of_badge(fcm_token: str, badge_key: str):
 
 # Keep your existing notify_user_of_badge exactly as it is!
 
-# 🌟 NEW: Add this generic sender for daily reminders
+# 🌟 UPDATED: Generic sender with "High Priority" and "Channel ID"
 def send_fcm_notification(fcm_token: str, title: str, body: str):
     if not fcm_token:
         print("⚠️ No FCM token for user. Skipping push.")
@@ -40,6 +40,15 @@ def send_fcm_notification(fcm_token: str, title: str, body: str):
         notification=messaging.Notification(
             title=title,
             body=body,
+        ),
+        android=messaging.AndroidConfig(
+            priority='high', # Wakes up the screen
+            notification=messaging.AndroidNotification(
+                channel_id='aduane_channel', # Matches your Flutter code!
+                sound='default',
+                default_vibrate_timings=True,
+                tag='meal_reminder',
+            ),
         ),
         token=fcm_token,
     )
