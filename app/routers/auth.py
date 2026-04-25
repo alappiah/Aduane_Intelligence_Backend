@@ -19,12 +19,12 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 def signup(user: schemas.UserCreate, db: Session = Depends(get_db)):
     print(f"📝 New signup attempt for email: {user.email}")
     
-    # 1. Check if the user already exists
+    # Check if the user already exists
     db_user = crud.get_user_by_email(db, email=user.email)
     if db_user:
       raise HTTPException(status_code=400, detail="Email already registered")
     
-    # 2. Create the user in the database
+    # Create the user in the database
     new_user = crud.create_user(db=db, user=user)
     return new_user
 
@@ -32,25 +32,25 @@ def signup(user: schemas.UserCreate, db: Session = Depends(get_db)):
 def login(user_credentials: schemas.UserLogin, db: Session = Depends(get_db)):
     print(f"🔐 Login attempt for email: {user_credentials.email}")
     
-    # 1. Search for the user by email
+    # Search for the user by email
     db_user = crud.get_user_by_email(db, email=user_credentials.email)
     
-    # If the email isn't in the database, reject them
+    # Reject them if the email does not exist
     if not db_user:
         raise HTTPException(status_code=403, detail="Invalid Credentials")
         
-    # 2. Check if the password matches the scrambled hash in the database
+    # Check if the password matches the scrambled hash in the database
     if not auth.verify_password(user_credentials.password, str(db_user.hashed_password)):
         raise HTTPException(status_code=403, detail="Invalid Credentials")
         
-    # 3. If everything matches, return the user's profile data!
+    # If everything matches, return the user's profile data
     print("✅ Login successful!")
     return db_user
 
 
-# --- HELPER: SEND EMAIL ---
+
 def send_reset_email(to_email: str, first_name: str, code: str):
-    # ⚠️ For your capstone, use a dedicated project Gmail account
+   
     sender_email = os.getenv("EMAIL_SENDER")
     sender_password = os.getenv("EMAIL_PASSWORD") 
 
@@ -71,15 +71,15 @@ def send_reset_email(to_email: str, first_name: str, code: str):
     msg['Subject'] = subject
     msg.attach(MIMEText(body, 'plain'))
 
-    # Add these right above 'try:'
+    
     print(f"🕵️ DEBUG Email: '{sender_email}'")
     print(f"🕵️ DEBUG Password Length: {len(str(sender_password))} characters")
 
     try:
-        # 🌟 THE FIX: Use SMTP_SSL and Port 465
+        
         server = smtplib.SMTP_SSL('smtp.gmail.com', 465)
         
-        # NOTE: We deleted server.starttls() because Port 465 is already secure!
+       
         
         server.login(str(sender_email), str(sender_password))
         server.send_message(msg)
@@ -89,32 +89,32 @@ def send_reset_email(to_email: str, first_name: str, code: str):
         print(f"❌ Failed to send email: {e}")
 
 
-# --- ENDPOINT: FORGOT PASSWORD ---
+
 @router.post("/forgot-password")
 def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db)):
     print(f"🔐 Password reset requested for: {request.email}")
     
-    # 1. Find the user in the database
+    # Find the user in the database
     user = db.query(models.User).filter(models.User.email == request.email).first()
     
-    # Security Best Practice: Always return a success message even if the email doesn't exist.
+    
     if not user:
         return {"message": "If that email exists in our system, a reset code has been sent."}
     
-    # 2. Generate a random 6-digit code
+    # Generate a random 6-digit code
     reset_code = str(random.randint(100000, 999999))
     
-    # 3. Set expiration time to 15 minutes from now (using UTC for safety)
+    # Set expiration time to 15 minutes from now (using UTC for safety)
     expiration_time = datetime.now(timezone.utc) + timedelta(minutes=15)
     
-    # 4. Save to the database 
-    # (Adding type: ignore tells VS Code's Pylance to stop worrying about SQLAlchemy Columns)
+    # Save to the database 
+
     user.reset_code = reset_code  # type: ignore
     user.reset_code_expires = expiration_time  # type: ignore
     db.commit()
     
-    # 5. Send the email! 
-    # (Wrapping in str() forces Pylance to recognize these are strings, not Column objects)
+    # Send the email 
+   
     send_reset_email(str(user.email), str(user.firstName), reset_code)
     
     return {"message": "If that email exists in our system, a reset code has been sent."}
@@ -123,28 +123,27 @@ def forgot_password(request: ForgotPasswordRequest, db: Session = Depends(get_db
 def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db)):
     print(f"🔄 Password reset attempt for: {request.email}")
     
-    # 1. Find the user
+    # Find the user
     user = db.query(models.User).filter(models.User.email == request.email).first()
     
     if not user:
         raise HTTPException(status_code=400, detail="Invalid email or reset code.")
         
-    # 2. Check if the code matches
+    # Check if the code matches
     if str(user.reset_code) != request.reset_code:
         raise HTTPException(status_code=400, detail="Invalid reset code.")
         
-    # 3. Check if the code has expired (using UTC to match how we saved it)
+    #  Check if the code has expired (using UTC to match how it was saved)
     if user.reset_code_expires is None or datetime.now(timezone.utc) > user.reset_code_expires:
         raise HTTPException(status_code=400, detail="Reset code has expired. Please request a new one.")
         
-    # 4. Hash the new password (assuming you have a get_password_hash function in your auth file)
-    # If your signup uses a different function name to hash passwords, use that here!
+    # Hash the new password 
     hashed_pw = auth.get_password_hash(request.new_password) 
     
-    # 5. Update the database
+    # Update the database
     user.password = hashed_pw  # type: ignore
     
-    # 6. VERY IMPORTANT: Wipe the code so it can't be used again!
+    # Wipe the code so it can't be used again
     user.reset_code = None  # type: ignore
     user.reset_code_expires = None  # type: ignore
     
@@ -153,18 +152,18 @@ def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db))
     print("✅ Password successfully reset!")
     return {"message": "Password has been reset successfully. You can now log in."}
 
-@router.post("/auth/change-password")
+@router.post("/change-password")
 async def change_password(request: ChangePasswordRequest, db: Session = Depends(get_db)):
-    # 1. Find the user
+    # Find the user
     user = db.query(models.User).filter(models.User.id == request.user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # 2. Verify the current password
+    # Verify the current password
     if not verify_password(request.current_password, str(user.hashed_password)):
         raise HTTPException(status_code=400, detail="Incorrect current password")
 
-    # 3. Hash the new password and save it
+    # Hash the new password and save it
     user.hashed_password = get_password_hash(request.new_password)
     db.commit()
 

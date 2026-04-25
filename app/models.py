@@ -3,6 +3,11 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
 from datetime import datetime, timezone
+from pgvector.sqlalchemy import Vector
+
+
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -109,13 +114,13 @@ class WorkoutLog(Base):
     # Links back to the User table
     owner = relationship("User", back_populates="workouts")
 
-from pgvector.sqlalchemy import Vector # Add to imports
+
 
 class MedicalGuideline(Base):
     __tablename__ = "medical_guidelines"
     id = Column(Integer, primary_key=True, index=True)
     content = Column(String, nullable=False)
-    metadata_json = Column(JSON) # Ensure this name matches your ingest script
+    metadata_json = Column(JSON) 
     embedding = Column(Vector(384))
 
 class Recipe(Base):

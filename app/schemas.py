@@ -54,10 +54,10 @@ class MessageBase(BaseModel):
     content: str
     sender: str
 
-    # Allow the API to accept the recipes list, defaulting to empty
+    
     recipes: Optional[List[Any]] = []
 
-    # 🌟 THE FIX: This intercepts the string from the database and turns it back into a list!
+    
     @field_validator('recipes', mode='before')
     @classmethod
     def parse_recipes_string(cls, value):

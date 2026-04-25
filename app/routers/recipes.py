@@ -22,7 +22,7 @@ router = APIRouter(prefix="/recipes", tags=["Recipes"])
 # ==========================================
 # Groq handles the "Coach" logic
 groq_client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
-# 🌟 GLOBAL CACHE VARIABLES
+
 _cached_recipe_df = None
 _cache_last_updated = None
 CACHE_TTL_MINUTES = 60
@@ -46,7 +46,7 @@ def get_cached_recipes(db: Session) -> pd.DataFrame:
     
     now = datetime.now()
     
-    # If we don't have the data yet, OR if the data is older than 60 minutes, fetch it!
+    # If the data is not available yet, or if the data is older than 60 minutes, fetch it!
     if _cached_recipe_df is None or _cache_last_updated is None or (now - _cache_last_updated) > timedelta(minutes=CACHE_TTL_MINUTES):
         print("🔄 Fetching fresh recipes from Supabase...")
         db_recipes = db.query(models.Recipe).all()
@@ -70,7 +70,7 @@ def check_safety(recipe_row, condition: str):
     """Uses pre-trained ML models to determine if a recipe is safe for a condition."""
     condition = condition.title()
     if condition not in ml_predictors or condition == "None": 
-        return 1 # Default to Safe
+        return 1
     
     features = [
         'sodium_mg', 
@@ -104,7 +104,7 @@ async def recommend_recipes(request: RecipeRequest, db: Session = Depends(get_db
     """Fetches safe Ghanaian recipes from Supabase and provides AI coaching via Groq."""
     print(f"🔍 Recommendation Request: '{request.query}' for {request.health_condition}")
     
-    # 1. Fetch ALL recipes from Supabase (Fresh from the DB)
+    # Fetch ALL recipes from Supabase (Fresh from the DB)
     try:
         data = get_cached_recipes(db).copy()
     except Exception as e:
@@ -114,7 +114,7 @@ async def recommend_recipes(request: RecipeRequest, db: Session = Depends(get_db
     if data.empty:
         raise HTTPException(status_code=404, detail="No recipes found in database.")
 
-    # 2. HARD FILTER LAYER (ML Safety Models)
+    # HARD FILTER LAYER (ML Safety Models)
     safe_indices = []
     for idx, row in data.iterrows():
         if check_safety(row, request.health_condition) == 1:
@@ -128,7 +128,8 @@ async def recommend_recipes(request: RecipeRequest, db: Session = Depends(get_db
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
         return StreamingResponse(empty_stream(), media_type="text/event-stream")
 
-    # 3. DYNAMIC CALORIE FILTERING
+    
+    # Dynamic Calorie Filtering
     safe_goal = request.calorie_goal if request.calorie_goal else 2000
     safe_current = request.current_calories if request.current_calories else 0
     remaining_calories = safe_goal - safe_current

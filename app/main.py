@@ -5,7 +5,7 @@ import firebase_admin
 from fastapi import FastAPI
 from . import models
 from .database import engine
-from .routers import auth, recipes, chat, users # Assuming you make a chat router too
+from .routers import auth, recipes, chat, users 
 from fastapi.middleware.cors import CORSMiddleware
 from app.database import SessionLocal
 from sqlalchemy.orm import Session
@@ -32,7 +32,7 @@ app = FastAPI(title="Ghana Recipe AI")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # In production, replace "*" with your app's domain
+    allow_origins=["*"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -48,7 +48,7 @@ app.include_router(users.router)
 def root():
     return {"message": "Welcome to the Ghana Recipe AI API"}
 
- # Adjust based on your actual imports
+
 
 
 # 1. The universal sender function
@@ -90,7 +90,7 @@ def send_scheduled_reminders(time_of_day: str):
 
 # 2. Start the Scheduler
 def start_scheduler():
-    # Ghana is UTC+0, so the server time matches local time perfectly
+    
     scheduler = BackgroundScheduler(timezone="UTC") 
     
     # Schedule all the jobs (Uses 24-hour time)
@@ -103,12 +103,12 @@ def start_scheduler():
     scheduler.start()
     print("⏰ Aduane Background Scheduler Started!")
 
-# Make sure to call this when your FastAPI app starts!
+
 start_scheduler()
 
-# Paste this near the bottom of main.py
-@app.get("/test-morning-brief")
-def test_morning_brief():
-    print("🚀 Forcing the 8:00 AM Morning Brief to run NOW...")
-    send_scheduled_reminders("morning")
-    return {"message": "Morning brief trigger sent to Firebase!"}
+# # Paste this near the bottom of main.py
+# @app.get("/test-morning-brief")
+# def test_morning_brief():
+#     print("🚀 Forcing the 8:00 AM Morning Brief to run NOW...")
+#     send_scheduled_reminders("morning")
+#     return {"message": "Morning brief trigger sent to Firebase!"}

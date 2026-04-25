@@ -28,9 +28,9 @@ def notify_user_of_badge(fcm_token: str, badge_key: str):
     except Exception as e:
         print(f"❌ FCM Error: {e}")
 
-# Keep your existing notify_user_of_badge exactly as it is!
 
-# 🌟 UPDATED: Generic sender with "High Priority" and "Channel ID"
+
+
 def send_fcm_notification(fcm_token: str, title: str, body: str):
     if not fcm_token:
         print("⚠️ No FCM token for user. Skipping push.")
@@ -44,7 +44,7 @@ def send_fcm_notification(fcm_token: str, title: str, body: str):
         android=messaging.AndroidConfig(
             priority='high', # Wakes up the screen
             notification=messaging.AndroidNotification(
-                channel_id='aduane_channel', # Matches your Flutter code!
+                channel_id='aduane_channel',
                 sound='default',
                 default_vibrate_timings=True,
                 tag='meal_reminder',

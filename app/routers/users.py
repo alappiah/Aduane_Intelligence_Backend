@@ -4,6 +4,7 @@ from sqlalchemy import func
 from datetime import datetime, timezone, timedelta
 
 
+
 from .. import models, schemas
 from ..database import get_db
 from app.services.notifications import notify_user_of_badge
@@ -37,14 +38,14 @@ def get_user_profile(user_id: int, db: Session = Depends(get_db)):
 
 @router.put("/update/{user_id}")
 def update_user_profile(user_id: int, profile_data: schemas.UserUpdate, db: Session = Depends(get_db)):
-    # 1. Find the exact user in the database
+    # Find the exact user in the database
     db_user = db.query(models.User).filter(models.User.id == user_id).first()
     
-    # 2. If they don't exist, throw a 404
+    # If they don't exist, throw a 404
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
     
-    # 3. Update all the fields (Adding type: ignore to bypass Pylance false positives)
+    # Update all the fields (Adding type: ignore to bypass Pylance false positives)
     db_user.firstName = profile_data.firstName  # type: ignore
     db_user.lastName = profile_data.lastName  # type: ignore
     db_user.date_of_birth = profile_data.date_of_birth  # type: ignore
@@ -56,7 +57,7 @@ def update_user_profile(user_id: int, profile_data: schemas.UserUpdate, db: Sess
     db_user.activity_level = profile_data.activity_level  # type: ignore
     db_user.health_condition = profile_data.health_condition  # type: ignore
 
-    # 4. Commit the changes to the PostgreSQL database
+    # ommit the changes to the PostgreSQL database
     try:
         db.commit()
         db.refresh(db_user)
@@ -68,15 +69,13 @@ def update_user_profile(user_id: int, profile_data: schemas.UserUpdate, db: Sess
 @router.delete("/{user_id}/delete-account")
 def delete_user_account(user_id: int, db: Session = Depends(get_db)):
     try:
-        # 1. Find the user in your database
+        # Find the user in your database
         user = db.query(models.User).filter(models.User.id == user_id).first()
         
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
 
-        # 2. Delete the user
-        # Thanks to the CASCADE rules you set up, Supabase will automatically 
-        # wipe their messages, meals, steps, workouts, and achievements simultaneously.
+        # Delete the user
         db.delete(user)
         db.commit()
 
@@ -90,14 +89,14 @@ def delete_user_account(user_id: int, db: Session = Depends(get_db)):
     
 @router.post("/{user_id}/update-fcm-token")
 async def update_fcm_token(user_id: int, data: schemas.FCMTokenUpdate, db: Session = Depends(get_db)):
-    # 1. Find the user in the database
+    # Find the user in the database
     user = db.query(models.User).filter(models.User.id == user_id).first()
     # 🌟 ADD THIS PRINT LINE:
     # print(f"DEBUG: Received request for User {user_id} with Token: '{data.fcm_token}'")
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # 2. Update the token column
+    # Update the token column
     user.fcm_token = data.fcm_token
     
     try:
@@ -177,8 +176,7 @@ def sync_steps(step_data: schemas.StepSync, db: Session = Depends(get_db)):
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Failed to sync steps: {str(e)}")
     
-# Update your check_for_step_achievements to trigger notifications
-from sqlalchemy.orm import joinedload # 🌟 Don't forget this import!
+
 
 def check_for_step_achievements(user_id: int, current_steps: int, db: Session):
     milestones = {
@@ -195,8 +193,7 @@ def check_for_step_achievements(user_id: int, current_steps: int, db: Session):
     if not user:
         return []
 
-    # 🌟 FIX: Use 'user.achievements' (the instance), not 'models.User.achievements' (the class)
-    # Also, match your model column name: 'achievement_key'
+    
     owned_badges = [a.achievement_key for a in user.achievements]
 
     for badge_key, goal in milestones.items():
@@ -206,8 +203,7 @@ def check_for_step_achievements(user_id: int, current_steps: int, db: Session):
             db.add(new_achievement)
             new_unlocks.append(badge_key)
             
-            # 3. 🌟 TRIGGER THE PUSH NOTIFICATION
-            # FIX: Use 'user.fcm_token', not 'models.User.fcm_token'
+            
             if user.fcm_token:
                 notify_user_of_badge(user.fcm_token, badge_key)
 
@@ -332,7 +328,7 @@ def log_workout(workout_data: schemas.WorkoutCreate, db: Session = Depends(get_d
 @router.get("/stats/weekly/{user_id}", response_model=schemas.WeeklyStatsResponse)
 def get_weekly_stats(user_id: int, db: Session = Depends(get_db)):
     # 1. Setup the Time Window (Last 7 days)
-    # We use UTC to match your model's default
+    # Use UTC to match model's default
     today = datetime.now(timezone.utc).date()
     seven_days_ago = today - timedelta(days=6)
 
@@ -356,7 +352,7 @@ def get_weekly_stats(user_id: int, db: Session = Depends(get_db)):
     ).all()
 
     # 3. Aggregate data by day
-    # We initialize every day with 0s so the charts don't have "holes"
+    # Initialize every day with 0s so the charts does not have "holes"
     daily_summary = {}
     for i in range(7):
         current_date = seven_days_ago + timedelta(days=i)

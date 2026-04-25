@@ -1,7 +1,6 @@
 import bcrypt
 
 def get_password_hash(password: str):
-    # bcrypt requires bytes, so we encode the string, hash it, and decode it back to a string for Postgres
     pwd_bytes = password.encode('utf-8')
     salt = bcrypt.gensalt()
     hashed_bytes = bcrypt.hashpw(pwd_bytes, salt)

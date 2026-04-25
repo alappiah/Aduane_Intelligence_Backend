@@ -26,7 +26,6 @@ router = APIRouter(
 groq_client = AsyncGroq(api_key=os.getenv("GROQ_API_KEY"))
 
 # SentenceTransformer handles local embedding (384-dimensions)
-# This model is lightweight and runs efficiently on Render's CPU
 embed_model = SentenceTransformer("all-MiniLM-L6-v2")
 
 print("✅ Aduane Intelligence: Groq + SQLAlchemy pgvector Ready!")
@@ -168,10 +167,9 @@ def find_food_in_db(food_name: str, db: Session):
             return None
 
         # 2. Pandas fuzzy search (case-insensitive 'contains')
-        # This is the Pandas equivalent of SQL's ILIKE '%food_name%'
         matches = df[df['name'].str.contains(food_name, case=False, na=False)]
 
-        # 3. If we found a match, return the first one as a dictionary
+        # 3. If a match is found , return the first one as a dictionary
         if not matches.empty:
             result = matches.iloc[0] # Grab the first matched row
             print(f"✅ Found match in Cache: {result['name']}")
@@ -210,7 +208,7 @@ async def handle_food_logging(request: ChatRequest, db: Session):
         food_name = request.query # Fallback
         
     # 2. SEARCH DATABASE
-    # (Replace this with your actual DB search logic/function)
+
     food_item = find_food_in_db(food_name, db) 
     
     # 3. STREAM GENERATOR (Talking to the user)
@@ -240,7 +238,7 @@ async def handle_food_logging(request: ChatRequest, db: Session):
                 if text_piece:
                     yield f"data: {json.dumps({'type': 'text', 'content': text_piece})}\n\n"
 
-            # 🌟 PRO-TIP FOR FLUTTER: Send a hidden UI trigger packet!
+            # Send a hidden UI trigger packet
             if food_item:
                 # We send a special packet at the end that the UI can catch to display the Yes/No buttons
                 action_packet = {
@@ -279,13 +277,13 @@ async def handle_general_chat(request: ChatRequest):
 
         try:
             stream = await groq_client.chat.completions.create(
-                model="llama-3.1-8b-instant", # The 8B model is perfect (and fast) for general chat
+                model="llama-3.1-8b-instant", 
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": request.query}
                 ],
                 stream=True,
-                temperature=0.7 # A little higher temperature makes the AI sound more natural and conversational
+                temperature=0.7 
             )
 
             # Stream the conversational text to Flutter
@@ -315,7 +313,7 @@ async def handle_user_message(request: ChatRequest, db: Session = Depends(get_db
     print(f"🚦 Routing Message: '{request.query}'")
 
     try:
-        # We sharpen the prompt to ensure 'Why' and 'How' questions go to Path 2
+       
         intent_response = await groq_client.chat.completions.create(
             model="llama-3.1-8b-instant",
             messages=[
@@ -369,6 +367,6 @@ async def handle_user_message(request: ChatRequest, db: Session = Depends(get_db
 
     except Exception as e:
         print(f"❌ Router Error: {e}. Falling back to recipes.")
-        # 🌟 FIX: Added 'db' here to prevent a TypeError crash
+        # 'db' here to prevent a TypeError crash
         fallback_request = RecipeRequest(query=request.query, health_condition=request.health_condition)
         return await recommend_recipes(fallback_request, db)
