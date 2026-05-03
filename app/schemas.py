@@ -160,7 +160,7 @@ class Achievement(AchievementBase):
     class Config:
         from_attributes = True
 
-# 🌟 Add these first
+
 class MealLogSchema(BaseModel):
     id: int
     name: str

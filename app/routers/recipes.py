@@ -228,7 +228,7 @@ INSTRUCTIONS:
 
             yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
-        # 🌟 ADD THIS BLOCK HERE
+        
         except asyncio.CancelledError:
             print("🛑 User disconnected. Stopping generation.")
             return 

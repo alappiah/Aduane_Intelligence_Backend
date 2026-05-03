@@ -91,8 +91,8 @@ def delete_user_account(user_id: int, db: Session = Depends(get_db)):
 async def update_fcm_token(user_id: int, data: schemas.FCMTokenUpdate, db: Session = Depends(get_db)):
     # Find the user in the database
     user = db.query(models.User).filter(models.User.id == user_id).first()
-    # 🌟 ADD THIS PRINT LINE:
-    # print(f"DEBUG: Received request for User {user_id} with Token: '{data.fcm_token}'")
+    
+    
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
@@ -145,7 +145,7 @@ def sync_steps(step_data: schemas.StepSync, db: Session = Depends(get_db)):
         ).first()
 
         if existing_log:
-            # 🌟 THE FIX: Remove the guardrail and ALWAYS overwrite!
+           
             existing_log.steps = step_data.steps
             existing_log.calories_burned = step_data.calories_burned
         else:
@@ -224,7 +224,7 @@ def get_today_dashboard(user_id: int, db: Session = Depends(get_db)):
         today = datetime.now(timezone.utc).date()
 
         # ---------------------------------------------------------
-        # 🌟 1. CALCULATE "DAYS ACTIVE" STREAK
+        # 1. CALCULATE "DAYS ACTIVE" STREAK
         # ---------------------------------------------------------
         # A. Get all dates where the user did something
         step_dates = db.query(models.DailyStepLog.date).filter(models.DailyStepLog.user_id == user_id, models.DailyStepLog.steps > 0).all()
@@ -279,7 +279,7 @@ def get_today_dashboard(user_id: int, db: Session = Depends(get_db)):
 
         # 3. Send it all back to Flutter
         return {
-            "daysActive": streak, # 🌟 The new streak stat!
+            "daysActive": streak, 
             "steps": today_steps,
             "meals": [
                 {

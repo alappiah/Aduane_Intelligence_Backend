@@ -335,7 +335,7 @@ async def handle_user_message(request: ChatRequest, db: Session = Depends(get_db
                 }
             ],
             max_tokens=1,
-            temperature=0.0 # 🌟 CRITICAL: Set to 0.0 so it never guesses or hallucinates!
+            temperature=0.0 
         )
 
         intent = intent_response.choices[0].message.content.strip()

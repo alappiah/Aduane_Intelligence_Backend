@@ -160,7 +160,7 @@ class Achievement(Base):
     # Relationships (Optional, but helpful for querying)
     user = relationship("User", back_populates="achievements")
 
-    # 🌟 CRITICAL: This prevents a user from earning the same badge twice.
+    # prevents a user from earning the same badge twice.
     __table_args__ = (
         UniqueConstraint('user_id', 'achievement_key', name='_user_achievement_uc'),
     )
