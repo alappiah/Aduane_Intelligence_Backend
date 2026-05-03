@@ -20,7 +20,6 @@
 - [Security](#security)
 - [Troubleshooting](#troubleshooting)
 
-
 ---
 
 ## Project Overview
@@ -207,7 +206,7 @@ The database operates on PostgreSQL with pgvector for semantic search and SQLite
 
 ### Cloud Deployment
 
-This API is designed to integrate seamlessly with Supabase for database hosting. The application runtime can be deployed to platforms like Render, Railway, or AWS (ECS/Elastic Beanstalk).
+This API is designed to integrate seamlessly with Supabase for database hosting. The application runtime can be deployed to platforms like Render.
 
 **Deployment Steps (e.g., Render):**
 
