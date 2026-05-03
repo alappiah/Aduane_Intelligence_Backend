@@ -51,7 +51,6 @@ The architecture is built as a REST API microservice using FastAPI. It utilises 
 | AI & Machine Learning | scikit-learn 1.6.1, sentence-transformers 5.2.2, Local Ollama Integration, Groq 1.1.2 |
 | File Storage          | Cloudinary 1.44.1                                                                     |
 | Push Notifications    | Firebase Admin SDK 6.5.0                                                              |
-| Testing Framework     | Pytest                                                                                |
 | Containerisation      | Docker, Docker Compose                                                                |
 | Package Manager       | pip                                                                                   |
 
@@ -170,8 +169,6 @@ python test_db.py
 # Test Firebase push notifications
 python test_push.py
 
-# Run standard unit tests
-pytest
 ```
 
 ---
@@ -179,7 +176,7 @@ pytest
 ## API Reference
 
 - **Base URL (Local):** `http://localhost:8000`
-- **Base URL (Production):** `https://api.aduaneintelligence.com`
+- **Base URL (Production):** `https://aduane-intelligence-backend.onrender.com`
 - **Authentication:** Standard JWT implementation. Include the token in the `Authorization` header as `Bearer <token>`.
 
 | Method & Path     | Description                        | Request Body                                                              | Response Format       | Auth Required |
